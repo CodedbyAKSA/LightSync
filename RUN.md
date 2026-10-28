@@ -189,7 +189,11 @@ Set `LIGHTSYNC_MODE=demo` in `.env` and restart the backend. Every value is then
 |---|---|
 | Arduino: `secrets.h: No such file or directory` | You have an old copy of the sketch. Use the current `lightsync_car.ino`, which builds on its own. |
 | LCD stuck on boot steps, or keeps rebooting | Power problem. Check the boot number on the LCD's top line: if it keeps rising, the ESP32 is resetting. Check the buck converter output (5.0 V), the common ground, and that the L298N 5V pin isn't connected. |
-| LCD shows `--` | Wrong Wi-Fi name or password, or a 5 GHz-only network |
+| LCD shows `--` | Wi-Fi isn't joined. Read the `[WIFI]` lines in Serial Monitor: the boot scan lists every network the car can see, and `can't join … (reason …)` says why |
+| Serial: `WIFI NOT FOUND` / `NO_AP_FOUND` | Hotspot off, set to 5 GHz, or `WIFI_SSID` misspelled (case and spaces matter) |
+| Serial: `AUTH_FAIL` / `HANDSHAKE_TIMEOUT` | Wrong `WIFI_PASS`, or the hotspot is WPA3-only; switch it to WPA2 or WPA2/WPA3 |
+| LCD shows `NO FRONT ECHO`, car won't move | Safety stop: the front ultrasonic hasn't answered yet. Wave a hand in front of it. If nothing changes, check its 5V, GND, TRIG (GPIO5) and ECHO (GPIO18) |
+| `Front=999.0` and `Rear=999.0` all the time | Both ultrasonics get no echo, usually no 5V. They need 5V from the buck converter, not the L298N 5V pin |
 | LCD shows `ERR`; Serial says `connection refused` | The backend isn't running, was started with `127.0.0.1`, or `LIGHTSYNC_URL` has the wrong IP |
 | LCD shows `ERR`; Serial says `read Timeout` | The firewall is blocking port 8000, or the network is set to Public (Part 5) |
 | Serial: `HTTP 401` | `LIGHTSYNC_DEVICE_KEY` in the sketch and in `.env` differ |

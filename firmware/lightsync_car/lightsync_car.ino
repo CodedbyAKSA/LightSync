@@ -242,6 +242,8 @@ volatile bool uplinkOk       = false;
  ***********************************************************************/
 float         cachedDist     = 999.0;
 float         cachedDistRear = 999.0;
+bool          frontEverEcho  = false;   // car won't drive until the front sensor has answered once
+bool          rearEverEcho   = false;
 unsigned long lastPingMs     = 0;
 bool          pingFrontNext  = true;
 #define PING_INTERVAL_MS 30            // each sensor refreshes every 60 ms
@@ -259,8 +261,8 @@ float pingCm(int trigPin, int echoPin) {
 void updateUltrasonics() {
   if (millis() - lastPingMs < PING_INTERVAL_MS) return;
   lastPingMs = millis();
-  if (pingFrontNext) cachedDist     = pingCm(TRIG_PIN,      ECHO_PIN);
-  else               cachedDistRear = pingCm(TRIG_PIN_REAR, ECHO_PIN_REAR);
+  if (pingFrontNext) { cachedDist     = pingCm(TRIG_PIN,      ECHO_PIN);      if (cachedDist     < 999.0f) frontEverEcho = true; }
+  else               { cachedDistRear = pingCm(TRIG_PIN_REAR, ECHO_PIN_REAR); if (cachedDistRear < 999.0f) rearEverEcho  = true; }
   pingFrontNext = !pingFrontNext;
 }
 
@@ -369,10 +371,15 @@ void applyCmd(MotorCmd cmd) {
 //    2. Front > 30 cm   → FORWARD
 //    3. Front 25–30 cm  → STOP (dead-band)
 //    4. Front < 25 cm   → BACKWARD, unless rear ≤ 25 cm → STOP
+//
+//  Safety: until the front ultrasonic has returned at least one echo the
+//  car stays stopped — a dead sensor reads "nothing ahead" forever.
+//  Wave a hand in front of it to start.
 // ═══════════════════════════════════════════════════════════════════════
 void navigate() {
   if (millis() - bootMs < STARTUP_DELAY_MS) { applyCmd(MC_STOP); return; }
   if (millis() < alertUntilMs)              { applyCmd(MC_STOP); return; }
+  if (!frontEverEcho)                       { applyCmd(MC_STOP); return; }
 
   float dist     = cachedDist;
   float distRear = cachedDistRear;
@@ -540,6 +547,11 @@ void printSensors() {
   Serial.printf("STATE : %s   (PWM R=%d L=%d)\n", motorState, pwmNowR, pwmNowL);
   Serial.printf("IR    : L=%s  R=%s\n", irLeftNow ? "OBS" : "CLR", irRightNow ? "OBS" : "CLR");
   Serial.printf("DIST  : Front=%.1f cm  Rear=%.1f cm\n", cachedDist, cachedDistRear);
+  if (!frontEverEcho)
+    Serial.println("[SENSOR] Front ultrasonic: no echo yet — car waits. Wave a hand in front; "
+                   "if nothing changes check its 5V, GND, TRIG=GPIO5, ECHO=GPIO18");
+  if (!rearEverEcho)
+    Serial.println("[SENSOR] Rear ultrasonic: no echo yet — check its 5V, GND, TRIG=GPIO2, ECHO=GPIO4");
   Serial.printf("ACCEL : X=%.2f Y=%.2f Z=%.2f g  [Amp=%d]%s\n", accelX, accelY, accelZ,
     (int)(sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ) * 10),
     mpuPresent ? "" : "  (MPU MISSING)");
@@ -814,10 +826,65 @@ void updateLCD() {
   char line0[17];
   char line1[17];
   snprintf(line0, sizeof(line0), "I%4dmA %-4s %3s", estimateCurrent_mA(), stShort, net);
-  snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
+  if (!frontEverEcho) snprintf(line1, sizeof(line1), "NO FRONT ECHO   ");
+  else                snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
 
   lcd.setCursor(0, 0); lcd.print(line0);
   lcd.setCursor(0, 1); lcd.print(line1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  WI-FI DIAGNOSTICS
+// ═══════════════════════════════════════════════════════════════════════
+void scanForNetwork() {
+  if (strcmp(WIFI_SSID, "your-wifi-ssid") == 0) {
+    Serial.println("[WIFI] WIFI_SSID / WIFI_PASS are still the placeholders — edit YOUR SETTINGS");
+    bootStep("SET WIFI_SSID!");
+    delay(2000);
+    return;
+  }
+  int n = WiFi.scanNetworks();
+  bool seen = false;
+  Serial.printf("[WIFI] %d networks visible (the ESP32 only sees 2.4 GHz):\n", n < 0 ? 0 : n);
+  for (int i = 0; i < n; i++) {
+    bool mine = WiFi.SSID(i) == WIFI_SSID;
+    seen |= mine;
+    if (i < 12 || mine)
+      Serial.printf("  %-28s ch%-2d %4d dBm%s\n", WiFi.SSID(i).c_str(), WiFi.channel(i),
+                    WiFi.RSSI(i), mine ? "   <- yours" : "");
+  }
+  WiFi.scanDelete();
+  if (!seen) {
+    Serial.printf("[WIFI] \"%s\" NOT FOUND. Check: hotspot on, 2.4 GHz band (not 5 GHz), "
+                  "name spelled exactly (case and spaces matter)\n", WIFI_SSID);
+    bootStep("WIFI NOT FOUND");
+    delay(2000);
+  }
+}
+
+// Prints why joining failed; repeats only when the reason changes or every 20th try
+void onWifiDisconnected(WiFiEvent_t, WiFiEventInfo_t info) {
+  static uint8_t lastReason = 0;
+  static uint32_t count = 0;
+  uint8_t r = info.wifi_sta_disconnected.reason;
+  count++;
+  if (r == lastReason && count % 20 != 1) return;
+  lastReason = r;
+  const char* hint = "";
+  switch (r) {
+    case WIFI_REASON_NO_AP_FOUND:
+      hint = "network not visible: hotspot off, 5 GHz only, or name misspelled"; break;
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_AUTH_EXPIRE:
+      hint = "wrong password, or hotspot set to WPA3-only (use WPA2 or WPA2/WPA3)"; break;
+    case WIFI_REASON_ASSOC_TOOMANY:
+      hint = "hotspot has too many devices connected"; break;
+    default: break;
+  }
+  Serial.printf("[WIFI] can't join \"%s\": %s (reason %u) %s\n", WIFI_SSID,
+                WiFi.disconnectReasonName((wifi_err_reason_t)r), r, hint);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -887,9 +954,14 @@ void setup() {
     delay(1000);
   }
 
+  // ── Wi-Fi — scan once so Serial shows whether your network is visible
+  bootStep("WiFi scan...");
+  WiFi.mode(WIFI_STA);
+  scanForNetwork();
+
   // ── Wi-Fi — started here, connects in the BACKGROUND ─────────────
   bootStep("WiFi start...");
-  WiFi.mode(WIFI_STA);
+  WiFi.onEvent(onWifiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);         // does NOT wait
   WiFi.setTxPower(WIFI_TX_POWER);
