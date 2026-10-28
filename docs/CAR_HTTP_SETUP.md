@@ -79,7 +79,10 @@ The car posts one flat JSON object about once a second. Keys are LightSync field
 | Key | Meaning |
 |---|---|
 | `obstacle_distance` | Front ultrasonic, cm. `400` means nothing in range. |
-| `ir_obstacle` | `1` if either IR edge sensor triggers |
+| `obstacle_distance_rear` | Rear ultrasonic, cm. `400` means nothing in range. |
+| `obstacle_distance_left`, `obstacle_distance_right` | Side ultrasonics, cm. Only sent when `USE_SIDE_ULTRASONIC` is `1` (left: TRIG 32 / ECHO 39, right: TRIG 17 / ECHO 16). They're shown on the dashboard but don't change how the car drives. |
+| `ir_left`, `ir_right` | `1` when that IR edge sensor triggers |
+| `ir_obstacle` | `1` if either IR sensor triggers |
 | `accel_x`, `accel_y`, `accel_z` | m/s², Z includes gravity |
 | `gyro_x`, `gyro_y`, `gyro_z` | °/s |
 | `battery_voltage` | Volts. Estimated by default (see below); measured when `USE_BATT_ADC` is `1` and the divider is wired. |

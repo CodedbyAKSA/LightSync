@@ -7,11 +7,14 @@ export type Source = 'blynk' | 'device' | 'demo' | 'computed' | 'system'
 export type Severity = 'info' | 'warning' | 'critical'
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 export type ProximityLevel = 'clear' | 'warning' | 'critical' | 'unknown'
+export type Side = 'front' | 'rear' | 'left' | 'right'
 
 export type FieldKey =
   | 'battery_voltage' | 'battery_current' | 'battery_soc' | 'battery_soh'
   | 'accel_x' | 'accel_y' | 'accel_z' | 'gyro_x' | 'gyro_y' | 'gyro_z'
   | 'obstacle_distance' | 'ir_obstacle' | 'vibration' | 'drowsiness' | 'risk_score'
+  | 'obstacle_distance_rear' | 'obstacle_distance_left' | 'obstacle_distance_right'
+  | 'ir_left' | 'ir_right'
   | 'espnow_link' | 'lcd_status' | 'autonomous_mode' | 'emergency_stop'
   | 'bluetooth_link' | 'espnow_rssi' | 'espnow_packet_loss' | 'heartbeat'
 
@@ -50,6 +53,7 @@ export interface Derived {
   gyro_magnitude: Reading
   dynamic_accel: Reading
   proximity: ProximityLevel
+  proximity_sides: Partial<Record<Side, ProximityLevel>>
   risk: RiskAssessment
 }
 

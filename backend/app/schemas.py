@@ -14,6 +14,7 @@ Source = Literal["blynk", "device", "demo", "computed", "system"]
 Severity = Literal["info", "warning", "critical"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 ProximityLevel = Literal["clear", "warning", "critical", "unknown"]
+Side = Literal["front", "rear", "left", "right"]
 
 ReadingValue = float | bool | str | None
 
@@ -55,6 +56,8 @@ class Derived(BaseModel):
     gyro_magnitude: Reading
     dynamic_accel: Reading
     proximity: ProximityLevel
+    proximity_sides: dict[Side, ProximityLevel] = Field(
+        default_factory=dict, description="Proximity per ultrasonic; 'front' equals proximity.")
     risk: RiskAssessment
 
 

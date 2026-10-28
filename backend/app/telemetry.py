@@ -40,6 +40,9 @@ from .normalize import (
     vector_magnitude,
 )
 from .risk import assess_risk, dynamic_acceleration, proximity_level
+
+SIDE_FIELDS = {"front": "obstacle_distance", "rear": "obstacle_distance_rear",
+               "left": "obstacle_distance_left", "right": "obstacle_distance_right"}
 from .schemas import (
     BlynkStatus,
     CommandAvailability,
@@ -352,6 +355,9 @@ class TelemetryService:
                                           observed, "needs valid accel_x, accel_y and accel_z"),
             proximity=proximity_level(number(readings, "obstacle_distance"),
                                       th.obstacle_warning_cm, th.obstacle_critical_cm),
+            proximity_sides={side: proximity_level(number(readings, key), th.obstacle_warning_cm,
+                                                   th.obstacle_critical_cm)
+                             for side, key in SIDE_FIELDS.items()},
             risk=assess_risk(readings, th),
         )
         return TelemetrySnapshot(device_id=self.settings.lightsync_device_id, mode=self.mode,

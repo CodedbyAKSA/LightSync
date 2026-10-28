@@ -117,3 +117,29 @@ def test_config_and_devices_describe_device_source():
     assert all(not cmd["available"] for cmd in cfg["commands"])
     assert [d["name"] for d in devices["devices"]] == ["LightSync car"]
     assert devices["devices"][0]["state"] == "online"
+
+
+def test_rear_side_and_ir_fields_from_the_car():
+    s = device_service()
+    with client_for(s) as c:
+        r = post(c, {**CAR_POST, "obstacle_distance": 120, "obstacle_distance_rear": 8.5,
+                     "ir_left": 1, "ir_right": 0})
+        assert r.json()["ignored"] == []
+        snap = c.get("/api/telemetry/latest").json()
+    sides = snap["derived"]["proximity_sides"]
+    assert sides == {"front": "clear", "rear": "critical", "left": "unknown", "right": "unknown"}
+    assert snap["derived"]["proximity"] == "clear"
+    assert snap["readings"]["ir_left"]["value"] is True
+    assert snap["readings"]["ir_right"]["value"] is False
+    assert snap["readings"]["obstacle_distance_left"]["available"] is False
+
+
+def test_demo_simulates_every_side():
+    s = TelemetryService(make_settings(), resolve_pin_map({}))
+    asyncio.run(s.tick())
+    r = s.latest.readings
+    for key in ("obstacle_distance_rear", "obstacle_distance_left", "obstacle_distance_right",
+                "ir_left", "ir_right"):
+        assert r[key].valid, key
+    assert r["ir_obstacle"].value == (r["ir_left"].value or r["ir_right"].value)
+    assert set(s.latest.derived.proximity_sides) == {"front", "rear", "left", "right"}

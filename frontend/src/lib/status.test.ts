@@ -20,7 +20,7 @@ function snap(values: Record<string, Reading['value']>, extra: Partial<Telemetry
     connection: { state: 'live', last_update: null, age_seconds: 0, hardware_connected: true, reason: null },
     readings,
     derived: {
-      accel_magnitude: empty, gyro_magnitude: empty, dynamic_accel: empty, proximity: 'clear',
+      accel_magnitude: empty, gyro_magnitude: empty, dynamic_accel: empty, proximity: 'clear', proximity_sides: {},
       risk: { available: true, level: 'LOW', score: 0, source: 'computed', method: '', factors: [] },
       ...extra,
     },

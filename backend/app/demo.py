@@ -9,6 +9,8 @@ Scenario per cycle:
   40-60 s  obstacle approaches to ~15 cm (warning, then critical), IR trips
   60-75 s  obstacle recedes, path clear again
   75-79 s  short vibration warning
+  throughout: rear and side distances drift; a wall closes in on the left
+  at 20-30 s (left IR trips), the right IR trips with the front obstacle
   every 4th cycle the ESP-NOW link drops for 4 s at t=82 s
 """
 
@@ -59,6 +61,13 @@ class DemoProvider:
         current = (1.8 if moving else 0.35) + _noise(tick, 8, 0.08)
         voltage = 11.1 + (soc / 100) * 1.45 - current * 0.03
 
+        rear = max(5.0, 95 + 25 * math.sin(t / 8) + _noise(tick, 11, 0.8))
+        left = 22 + 10 * abs(t - 25) / 5 if 20 <= t < 30 else 60 + 15 * math.sin(t / 5)
+        left = max(5.0, left + _noise(tick, 12, 0.8))
+        right = max(5.0, 75 + 20 * math.cos(t / 7) + _noise(tick, 13, 0.8))
+        ir_left = left < 25
+        ir_right = distance < 30
+
         link_drop = cycle % 4 == 3 and 82 <= t < 86
         return {
             "battery_voltage": round(voltage, 2),
@@ -68,7 +77,12 @@ class DemoProvider:
             "accel_x": round(ax, 3), "accel_y": round(ay, 3), "accel_z": round(az, 3),
             "gyro_x": round(gx, 2), "gyro_y": round(gy, 2), "gyro_z": round(gz, 2),
             "obstacle_distance": round(distance, 1),
-            "ir_obstacle": distance < 30,
+            "ir_obstacle": ir_left or ir_right,
+            "obstacle_distance_rear": round(rear, 1),
+            "obstacle_distance_left": round(left, 1),
+            "obstacle_distance_right": round(right, 1),
+            "ir_left": ir_left,
+            "ir_right": ir_right,
             "vibration": 1 if 75 <= t < 79 else 0,
             "drowsiness": False,
             "espnow_link": not link_drop,

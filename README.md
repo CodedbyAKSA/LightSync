@@ -138,6 +138,8 @@ Create one **virtual-pin datastream** per field you actually publish. The defaul
 | gyro_x / y / z | V7–V9 | double, °/s | calibrated |
 | obstacle_distance | V10 | double, 0–1000 cm | |
 | ir_obstacle | V11 | int 0/1 | 1 = obstacle |
+| obstacle_distance_rear / _left / _right | none | double, 0–1000 cm | rear and side ultrasonics |
+| ir_left / ir_right | none | int 0/1 | individual IR sensors |
 | vibration | V12 | int 0/1/2 | normal / warning / active |
 | drowsiness | V13 | int 0/1 | only if a detector exists |
 | risk_score | V14 | double 0–100 | optional; otherwise computed |

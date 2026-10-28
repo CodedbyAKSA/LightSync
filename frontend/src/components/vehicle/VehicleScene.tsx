@@ -3,17 +3,17 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, type ComponentRef } from 'react'
 import * as THREE from 'three'
 import type { ThemeColors } from '../../theme/colors'
-import type { ProximityLevel } from '../../types/telemetry'
+import type { ProximityLevel, Side } from '../../types/telemetry'
+import { MAX_CM, type SensorView } from './sensors'
 
 /**
- * Procedural compact EV built from primitives (no external model), facing +X
- * toward an obstacle whose position follows the measured distance.
+ * Procedural compact EV built from primitives (no external model), facing +X.
+ * Each ultrasonic (front, rear, left, right) sends waves toward an obstacle
+ * whose position follows that sensor's measured distance.
  */
 
 export interface VehicleSceneProps {
-  /** Measured obstacle distance in cm, or null when unavailable. */
-  distanceCm: number | null
-  proximity: ProximityLevel
+  sensors: SensorView[]
   /** False while telemetry is stale/offline: waves stop, scene dims. */
   active: boolean
   hazard: boolean
@@ -27,16 +27,26 @@ export interface VehicleSceneHandle {
   resetView: () => void
 }
 
-const SENSOR_X = 1.06
 const MIN_GAP = 0.35
 const MAX_GAP = 2.4
-const MAX_CM = 200
 const OBSTACLE_HALF = 0.16
 
-export function distanceToGap(distanceCm: number | null): number {
-  if (distanceCm === null) return MAX_GAP
+/**
+ * Per-side geometry in the side's own frame, where +X points away from the car.
+ * yaw turns that frame around Y: right (+Z) is -90°, left (-Z) is +90°.
+ * Side obstacles are low and translucent so they don't hide the car.
+ */
+const SIDES: Record<Side, { yaw: number; sensor: number; width: number; height: number; maxGap: number; ghost: boolean }> = {
+  front: { yaw: 0, sensor: 1.06, width: 1.2, height: 1.16, maxGap: 1.4, ghost: false },
+  rear: { yaw: Math.PI, sensor: 1.06, width: 1.2, height: 1.16, maxGap: 1.4, ghost: false },
+  left: { yaw: Math.PI / 2, sensor: 0.56, width: 1.7, height: 0.55, maxGap: 1.1, ghost: false },
+  right: { yaw: -Math.PI / 2, sensor: 0.56, width: 1.7, height: 0.22, maxGap: 1.1, ghost: true },
+}
+
+export function distanceToGap(distanceCm: number | null, maxGap = MAX_GAP): number {
+  if (distanceCm === null) return maxGap
   const clamped = Math.max(0, Math.min(MAX_CM, distanceCm))
-  return MIN_GAP + (clamped / MAX_CM) * (MAX_GAP - MIN_GAP)
+  return MIN_GAP + (clamped / MAX_CM) * (maxGap - MIN_GAP)
 }
 
 function proximityColor(p: ProximityLevel, c: ThemeColors): string {
@@ -97,6 +107,13 @@ function Car({ colors, theme, hazard }: { colors: ThemeColors; theme: 'light' | 
           <meshStandardMaterial color="#1d2733" metalness={0.6} roughness={0.4} />
         </mesh>
       ))}
+      {/* Rear ultrasonic */}
+      {[-0.11, 0.11].map((z) => (
+        <mesh key={`r${z}`} position={[-1.035, 0.27, z]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.055, 0.055, 0.04, 20]} />
+          <meshStandardMaterial color="#1d2733" metalness={0.6} roughness={0.4} />
+        </mesh>
+      ))}
       {/* Headlights */}
       {[-0.4, 0.4].map((z) => (
         <mesh key={`h${z}`} position={[1.02, 0.42, z]}>
@@ -125,12 +142,13 @@ function Car({ colors, theme, hazard }: { colors: ThemeColors; theme: 'light' | 
   )
 }
 
-function SensorWaves({ gapRef, color, active, speed, pulseRef }: {
+function SensorWaves({ gapRef, color, active, speed, pulseRef, sensorX }: {
   gapRef: React.RefObject<number>
   color: string
   active: boolean
   speed: number
   pulseRef: React.RefObject<number>
+  sensorX: number
 }) {
   const group = useRef<THREE.Group>(null)
   const geometry = useMemo(() => new THREE.TorusGeometry(1, 0.022, 8, 40, Math.PI / 2.4), [])
@@ -162,7 +180,7 @@ function SensorWaves({ gapRef, color, active, speed, pulseRef }: {
   })
 
   return (
-    <group ref={group} position={[SENSOR_X, 0.3, 0]} rotation={[0, 0, -Math.PI / 4.8]}>
+    <group ref={group} position={[sensorX, 0.3, 0]} rotation={[0, 0, -Math.PI / 4.8]}>
       {materials.map((m, i) => (
         <mesh key={i} geometry={geometry} material={m} />
       ))}
@@ -170,14 +188,22 @@ function SensorWaves({ gapRef, color, active, speed, pulseRef }: {
   )
 }
 
-function Obstacle({ gapRef, targetGap, color, warn }: { gapRef: React.RefObject<number>; targetGap: number; color: string; warn: boolean }) {
+function Obstacle({ gapRef, targetGap, color, warn, sensorX, width, height, ghost }: {
+  gapRef: React.RefObject<number>
+  targetGap: number
+  color: string
+  warn: boolean
+  sensorX: number
+  width: number
+  height: number
+  ghost: boolean
+}) {
   const mesh = useRef<THREE.Mesh>(null)
   const line = useRef<THREE.Group>(null)
   const mat = useRef<THREE.MeshStandardMaterial>(null)
 
-  useFrame(({ clock }, delta) => {
-    gapRef.current += (targetGap - gapRef.current) * Math.min(1, delta * 4)
-    const x = SENSOR_X + gapRef.current + OBSTACLE_HALF
+  useFrame(({ clock }) => {
+    const x = sensorX + gapRef.current + OBSTACLE_HALF
     if (mesh.current) mesh.current.position.x = x
     if (line.current) line.current.scale.x = gapRef.current
     if (mat.current) mat.current.emissiveIntensity = warn ? 0.35 + 0.35 * Math.sin(clock.elapsedTime * 6) : 0.04
@@ -185,37 +211,74 @@ function Obstacle({ gapRef, targetGap, color, warn }: { gapRef: React.RefObject<
 
   return (
     <>
-      <mesh ref={mesh} position={[SENSOR_X + targetGap + OBSTACLE_HALF, 0.58, 0]} castShadow>
-        <boxGeometry args={[OBSTACLE_HALF * 2, 1.16, 1.2]} />
-        <meshStandardMaterial ref={mat} color="#3b4b5f" emissive={color} emissiveIntensity={0.04} roughness={0.7} />
+      <mesh ref={mesh} position={[sensorX + targetGap + OBSTACLE_HALF, height / 2, 0]} castShadow={!ghost}>
+        <boxGeometry args={[OBSTACLE_HALF * 2, height, width]} />
+        <meshStandardMaterial ref={mat} color="#3b4b5f" emissive={color} emissiveIntensity={0.04} roughness={0.7}
+          transparent={ghost} opacity={ghost ? 0.3 : 1} depthWrite={!ghost} />
       </mesh>
-      <group ref={line} position={[SENSOR_X, 0.3, 0]}>
+      <group ref={line} position={[sensorX, 0.3, 0]}>
         <Line points={[[0, 0, 0], [1, 0, 0]]} color={color} lineWidth={1.5} dashed dashSize={0.06} gapSize={0.05} transparent opacity={0.8} />
       </group>
     </>
   )
 }
 
-function Scene({ distanceCm, proximity, active, hazard, pulseKey, theme, colors }: VehicleSceneProps) {
-  const targetGap = distanceToGap(distanceCm)
+function SideSensor({ sensor, active, pulseKey, colors, maxGap }: { sensor: SensorView; active: boolean; pulseKey: string | null; colors: ThemeColors; maxGap: number }) {
+  const geo = SIDES[sensor.side]
+  const targetGap = distanceToGap(sensor.distanceCm, maxGap)
   const gapRef = useRef(targetGap)
   const pulseRef = useRef(0)
   useEffect(() => {
     pulseRef.current = 1
   }, [pulseKey])
+  useFrame((_, delta) => {
+    gapRef.current += (targetGap - gapRef.current) * Math.min(1, delta * 4)
+  })
+  const { proximity, distanceCm } = sensor
   const color = proximityColor(active ? proximity : 'unknown', colors)
   const speed = proximity === 'critical' ? 1.6 : proximity === 'warning' ? 1.1 : 0.7
+  const inRange = distanceCm !== null && distanceCm < MAX_CM
+
+  return (
+    <group rotation={[0, geo.yaw, 0]}>
+      <SensorWaves gapRef={gapRef} color={color} active={active && distanceCm !== null} speed={speed} pulseRef={pulseRef} sensorX={geo.sensor} />
+      {inRange && (
+        <Obstacle gapRef={gapRef} targetGap={targetGap} color={color} warn={active && proximity !== 'clear'}
+          sensorX={geo.sensor} width={geo.width} height={geo.height} ghost={geo.ghost} />
+      )}
+    </group>
+  )
+}
+
+/** Zooms out on narrow canvases so the rear and side obstacles stay in frame. */
+function FitCamera({ surround }: { surround: boolean }) {
+  useFrame(({ camera, size }) => {
+    const zoom = surround ? Math.min(1, size.width / Math.max(1, size.height) / 2.1) : 1
+    if (camera instanceof THREE.PerspectiveCamera && Math.abs(camera.zoom - zoom) > 1e-3) {
+      camera.zoom = zoom
+      camera.updateProjectionMatrix()
+    }
+  })
+  return null
+}
+
+function Scene({ sensors, active, hazard, pulseKey, theme, colors }: VehicleSceneProps) {
+  // With only a front sensor the car sits left so the obstacle has room; otherwise it's centred.
+  const surround = sensors.some((s) => s.side !== 'front')
 
   return (
     <>
       <hemisphereLight args={[theme === 'dark' ? '#b8d4ff' : '#ffffff', theme === 'dark' ? '#0a1621' : '#d8dee6', 0.9]} />
       <directionalLight position={[2.5, 5, 3]} intensity={theme === 'dark' ? 1.8 : 2.2} castShadow />
       <directionalLight position={[-3, 2, -2]} intensity={0.45} color="#9ad8ff" />
-      <group position={[-0.9, 0, 0]}>
+      <group position={[surround ? -0.15 : -0.9, 0, 0]}>
         <Car colors={colors} theme={theme} hazard={hazard} />
-        <SensorWaves gapRef={gapRef} color={color} active={active && distanceCm !== null} speed={speed} pulseRef={pulseRef} />
-        {distanceCm !== null && <Obstacle gapRef={gapRef} targetGap={targetGap} color={color} warn={active && proximity !== 'clear'} />}
+        {sensors.map((s) => (
+          <SideSensor key={s.side} sensor={s} active={active} pulseKey={pulseKey} colors={colors}
+            maxGap={surround ? SIDES[s.side].maxGap : MAX_GAP} />
+        ))}
       </group>
+      <FitCamera surround={surround} />
       <ContactShadows position={[0, 0, 0]} opacity={theme === 'dark' ? 0.55 : 0.3} scale={7} blur={2.2} far={1.2} frames={1} />
     </>
   )
@@ -231,7 +294,7 @@ const VehicleScene = forwardRef<VehicleSceneHandle, VehicleSceneProps>(function 
       camera={{ position: [1.45, 1.95, 5.0], fov: 30 }}
       gl={{ alpha: true, antialias: true, powerPreference: 'low-power' }}
       style={{ background: 'transparent' }}
-      aria-label="3D vehicle and obstacle visualization"
+      aria-label="3D vehicle with front, rear and side obstacle distances"
     >
       <Scene {...props} />
       <OrbitControls

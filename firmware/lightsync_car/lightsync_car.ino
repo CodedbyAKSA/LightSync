@@ -27,8 +27,11 @@
  *    • Navigation, motor soft-start, accident detection: same as v25
  *
  *  Fields sent (LightSync keys):
- *    obstacle_distance  front ultrasonic, cm (400 = nothing in range)
- *    ir_obstacle        1 if either IR edge sensor triggers
+ *    obstacle_distance        front ultrasonic, cm (400 = nothing in range)
+ *    obstacle_distance_rear   rear ultrasonic, cm (400 = nothing in range)
+ *    obstacle_distance_left/right  side ultrasonics (only when USE_SIDE_ULTRASONIC = 1)
+ *    ir_left, ir_right  1 when that IR edge sensor triggers
+ *    ir_obstacle        1 if either IR sensor triggers
  *    accel_x/y/z        m/s²     gyro_x/y/z  °/s
  *    battery_voltage    V  (estimated, or measured when USE_BATT_ADC = 1)
  *    battery_soc        %
@@ -42,8 +45,8 @@ void applyCmd(MotorCmd cmd);
 
 // Snapshot the driving loop hands to the uplink task
 struct CarTelemetry {
-  float    front, rear;
-  bool     irAny;
+  float    front, rear, left, right;   // cm, 400 = nothing in range
+  bool     irL, irR, irAny;
   float    ax, ay, az, gx, gy, gz;
   float    battV;           // estimated or measured, volts
   int      soc;
@@ -133,6 +136,14 @@ const float OCV_TABLE[11] = { 3.20f, 3.55f, 3.68f, 3.74f, 3.77f, 3.80f,
 #define ECHO_PIN       18
 #define TRIG_PIN_REAR   2  // NOTE: GPIO2 = on-board blue LED on most boards (it will blink faintly)
 #define ECHO_PIN_REAR   4
+
+// Optional left/right ultrasonics — display only, they don't change driving.
+// Wire two more HC-SR04s (5V, GND) and set USE_SIDE_ULTRASONIC to 1.
+#define USE_SIDE_ULTRASONIC 0
+#define TRIG_PIN_LEFT  32
+#define ECHO_PIN_LEFT  39   // input-only pin, fine for ECHO
+#define TRIG_PIN_RIGHT 17
+#define ECHO_PIN_RIGHT 16
 
 MPU6050 mpu(0x68);
 
@@ -247,6 +258,8 @@ bool          wifiSeen       = true;   // boot scan found WIFI_SSID
  ***********************************************************************/
 float         cachedDist     = 999.0;
 float         cachedDistRear = 999.0;
+float         cachedDistLeft = 999.0;
+float         cachedDistRight = 999.0;
 unsigned long lastPingMs     = 0;
 bool          pingFrontNext  = true;
 #define PING_INTERVAL_MS 30            // each sensor refreshes every 60 ms
@@ -264,9 +277,21 @@ float pingCm(int trigPin, int echoPin) {
 void updateUltrasonics() {
   if (millis() - lastPingMs < PING_INTERVAL_MS) return;
   lastPingMs = millis();
+#if USE_SIDE_ULTRASONIC
+  // Front every other slot so obstacle avoidance stays as fast as before
+  static uint8_t slot = 0;
+  switch (slot) {
+    case 0: case 2: case 4: cachedDist      = pingCm(TRIG_PIN,       ECHO_PIN);       break;
+    case 1:                 cachedDistRear  = pingCm(TRIG_PIN_REAR,  ECHO_PIN_REAR);  break;
+    case 3:                 cachedDistLeft  = pingCm(TRIG_PIN_LEFT,  ECHO_PIN_LEFT);  break;
+    case 5:                 cachedDistRight = pingCm(TRIG_PIN_RIGHT, ECHO_PIN_RIGHT); break;
+  }
+  slot = (slot + 1) % 6;
+#else
   if (pingFrontNext) cachedDist     = pingCm(TRIG_PIN,      ECHO_PIN);
   else               cachedDistRear = pingCm(TRIG_PIN_REAR, ECHO_PIN_REAR);
   pingFrontNext = !pingFrontNext;
+#endif
 }
 
 /*************** IR DEBOUNCE ***************/
@@ -525,7 +550,11 @@ void readSensors() {
   const float G = 9.80665f;
   CarTelemetry t;
   t.front    = cachedDist >= 999.0f ? 400.0f : cachedDist;   // HC-SR04 max range
-  t.rear     = cachedDistRear;
+  t.rear     = cachedDistRear  >= 999.0f ? 400.0f : cachedDistRear;
+  t.left     = cachedDistLeft  >= 999.0f ? 400.0f : cachedDistLeft;
+  t.right    = cachedDistRight >= 999.0f ? 400.0f : cachedDistRight;
+  t.irL      = irLeftNow;
+  t.irR      = irRightNow;
   t.irAny    = irLeftNow || irRightNow;
   t.ax = accelX * G; t.ay = accelY * G; t.az = accelZ * G;
   t.gx = gyroX;      t.gy = gyroY;      t.gz = gyroZ;
@@ -544,7 +573,11 @@ void printSensors() {
   Serial.println("─────────────────────────────");
   Serial.printf("STATE : %s   (PWM R=%d L=%d)\n", motorState, pwmNowR, pwmNowL);
   Serial.printf("IR    : L=%s  R=%s\n", irLeftNow ? "OBS" : "CLR", irRightNow ? "OBS" : "CLR");
-  Serial.printf("DIST  : Front=%.1f cm  Rear=%.1f cm\n", cachedDist, cachedDistRear);
+  Serial.printf("DIST  : Front=%.1f cm  Rear=%.1f cm", cachedDist, cachedDistRear);
+#if USE_SIDE_ULTRASONIC
+  Serial.printf("  Left=%.1f cm  Right=%.1f cm", cachedDistLeft, cachedDistRight);
+#endif
+  Serial.println();
   Serial.printf("ACCEL : X=%.2f Y=%.2f Z=%.2f g  [Amp=%d]%s\n", accelX, accelY, accelZ,
     (int)(sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ) * 10),
     mpuPresent ? "" : "  (MPU MISSING)");
@@ -564,14 +597,20 @@ void printSensors() {
 // ═══════════════════════════════════════════════════════════════════════
 int buildJson(char* out, size_t len, const CarTelemetry& t, uint32_t heartbeat) {
   int n = snprintf(out, len,
-    "{\"obstacle_distance\":%.1f,\"ir_obstacle\":%d,"
+    "{\"obstacle_distance\":%.1f,\"obstacle_distance_rear\":%.1f,"
+    "\"ir_obstacle\":%d,\"ir_left\":%d,\"ir_right\":%d,"
     "\"accel_x\":%.3f,\"accel_y\":%.3f,\"accel_z\":%.3f,"
     "\"gyro_x\":%.2f,\"gyro_y\":%.2f,\"gyro_z\":%.2f,"
     "\"battery_soc\":%d,\"lcd_status\":%d,\"autonomous_mode\":1,"
     "\"emergency_stop\":%d,\"heartbeat\":%lu,\"battery_voltage\":%.2f}",
-    t.front, t.irAny ? 1 : 0,
+    t.front, t.rear, t.irAny ? 1 : 0, t.irL ? 1 : 0, t.irR ? 1 : 0,
     t.ax, t.ay, t.az, t.gx, t.gy, t.gz,
     t.soc, t.lcdOk ? 1 : 0, t.accident ? 1 : 0, (unsigned long)heartbeat, t.battV);
+#if USE_SIDE_ULTRASONIC
+  // Replace the closing brace with the side distances
+  n += snprintf(out + n - 1, len - n + 1, ",\"obstacle_distance_left\":%.1f,"
+                "\"obstacle_distance_right\":%.1f}", t.left, t.right) - 1;
+#endif
   return n;
 }
 
@@ -940,6 +979,10 @@ void setup() {
   pinMode(ECHO_PIN,      INPUT);
   pinMode(TRIG_PIN_REAR, OUTPUT);
   pinMode(ECHO_PIN_REAR, INPUT);
+#if USE_SIDE_ULTRASONIC
+  pinMode(TRIG_PIN_LEFT,  OUTPUT); pinMode(ECHO_PIN_LEFT,  INPUT); digitalWrite(TRIG_PIN_LEFT,  LOW);
+  pinMode(TRIG_PIN_RIGHT, OUTPUT); pinMode(ECHO_PIN_RIGHT, INPUT); digitalWrite(TRIG_PIN_RIGHT, LOW);
+#endif
   digitalWrite(TRIG_PIN, LOW);
   digitalWrite(TRIG_PIN_REAR, LOW);
 #if USE_BATT_ADC
