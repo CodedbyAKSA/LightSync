@@ -64,8 +64,8 @@ struct CarTelemetry {
 #if __has_include("secrets.h")
   #include "secrets.h"
 #else
-  #define WIFI_SSID            "your-wifi-ssid"
-  #define WIFI_PASS            "your-wifi-password"
+  #define WIFI_SSID            "Karthikkk"
+  #define WIFI_PASS            "karthik2005"
   #define LIGHTSYNC_URL        "http://10.58.35.57:8000"   // PC Wi-Fi IPv4 (ipconfig) — recheck if it changes
   #define LIGHTSYNC_DEVICE_KEY "bcM7yuw1fkBcBzPZ6kF89_8NGwhSGSMqgA3jcqo-NJU"   // = LIGHTSYNC_DEVICE_KEY in .env
 #endif
