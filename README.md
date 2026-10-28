@@ -14,6 +14,31 @@ ESP8266 node ──ESP-NOW──▶ ESP32 gateway ──Wi-Fi/HTTPS──▶ Bly
 - Only the **ESP32 gateway** connects to Wi-Fi and Blynk. The ESP8266 never talks to Blynk directly.
 - The **backend** is the only component that knows the Blynk token. It polls Blynk, validates and normalizes the values, keeps a bounded history, detects events and streams snapshots to the browser over Server-Sent Events (SSE). If streaming is unavailable, the browser falls back to polling.
 
+## Documentation
+
+| Guide | What it covers |
+|---|---|
+| [docs/RUNNING.md](docs/RUNNING.md) | Install, start, check, test and deploy the app, plus troubleshooting for every common error |
+| [docs/BLYNK_SETUP.md](docs/BLYNK_SETUP.md) | Step-by-step Blynk setup: template, datastreams, device token, `.env`, firmware, live mode and commands |
+
+## Screenshots
+
+All screenshots are from the built-in **demo mode**, except the last row, which shows live mode with no Blynk token configured. Every simulated value carries a *Demo* label in the app.
+
+| Overview (dark) | Overview (light) |
+|---|---|
+| ![Overview, dark theme](docs/screenshots/01-overview-dark.png) | ![Overview, light theme](docs/screenshots/02-overview-light.png) |
+| **Collision warning** (obstacle inside the critical zone) | **Command confirmation** |
+| ![Collision warning](docs/screenshots/03-collision-warning-dark.png) | ![Emergency stop confirmation](docs/screenshots/10-emergency-stop-confirm.png) |
+| **Live Sensors** | **Safety Events** |
+| ![Live Sensors page](docs/screenshots/04-live-sensors.png) | ![Safety Events page](docs/screenshots/05-safety-events.png) |
+| **Battery Health** | **Automation** |
+| ![Battery Health page](docs/screenshots/06-battery-health.png) | ![Automation page](docs/screenshots/07-automation.png) |
+| **Device Network** | **Settings** |
+| ![Device Network page](docs/screenshots/08-device-network.png) | ![Settings page](docs/screenshots/09-settings.png) |
+| **Live mode without a Blynk token** (honest OFFLINE state) | **Mobile** |
+| ![Offline without token](docs/screenshots/13-offline-no-token.png) | ![Mobile overview](docs/screenshots/11-mobile-overview.png) ![Mobile navigation](docs/screenshots/12-mobile-navigation.png) |
+
 ## Contents
 
 | Path | What it is |
@@ -75,6 +100,8 @@ Open <http://localhost:5173>. With the default `.env`, the backend runs in **dem
 For a production build, run `npm run build` in `frontend/` and serve `frontend/dist` behind a reverse proxy that forwards `/api` to the backend. Disable response buffering for `/api/telemetry/stream`.
 
 ## 4. Configuring Blynk credentials securely
+
+> For a full walkthrough with Blynk.Console steps, see [docs/BLYNK_SETUP.md](docs/BLYNK_SETUP.md).
 
 1. In Blynk Console, open **Device → Device Info** and copy the **auth token**.
 2. Put it in `.env` as `BLYNK_TOKEN=...`. Set `BLYNK_SERVER` to the host shown at the bottom right of the Console, for example `blynk.cloud` or `fra1.blynk.cloud`.
@@ -221,6 +248,8 @@ Frontend tests cover:
 - unavailable versus zero rendering
 
 ## 12. Troubleshooting
+
+> More error messages and fixes (installation, ports, blank pages, commands, tests) are in [docs/RUNNING.md](docs/RUNNING.md#troubleshooting).
 
 | Symptom | Check |
 |---|---|
