@@ -22,7 +22,8 @@
  *    • Battery voltage always sent: estimated from charge used and a
  *        Li-ion discharge curve, or measured on GPIO36 (USE_BATT_ADC = 1)
  *    • Vibration sensor removed
- *    • LCD line 1 shows the uplink state: OK / ERR / -- (no Wi-Fi)
+ *    • LCD line 1 shows the uplink state: OK / ERR / -- (no Wi-Fi);
+ *        line 2 flashes the Wi-Fi problem (SET SSID / NOT FOUND / BAD PASS?)
  *    • Navigation, motor soft-start, accident detection: same as v25
  *
  *  Fields sent (LightSync keys):
@@ -78,7 +79,9 @@ struct CarTelemetry {
 /*************** UPLINK ***************/
 #define UPLINK_INTERVAL_MS  1000   // one post per second
 #define UPLINK_TIMEOUT_MS   3000
-#define WIFI_TX_POWER       WIFI_POWER_8_5dBm   // low = smaller current spikes
+#define WIFI_RETRY_MS       20000  // start a fresh join if not connected for this long
+// 0 = full Wi-Fi power (best range). Set 1 only if the ESP32 resets when Wi-Fi starts.
+#define WIFI_LOW_TX_POWER   0
 const char* TELEMETRY_PATH = "/api/device/telemetry";
 
 /*************** BATTERY ***************/
@@ -236,14 +239,14 @@ portMUX_TYPE  sharedMux = portMUX_INITIALIZER_UNLOCKED;
 // Uplink status for LCD / Serial
 volatile int  uplinkHttpCode = 0;      // last HTTP status, <0 = transport error, 0 = never
 volatile bool uplinkOk       = false;
+volatile uint8_t wifiReason  = 0;      // last Wi-Fi disconnect reason, 0 = none yet
+bool          wifiSeen       = true;   // boot scan found WIFI_SSID
 
 /***********************************************************************
  *  ULTRASONIC — front and rear pinged ALTERNATELY (no cross-talk)
  ***********************************************************************/
 float         cachedDist     = 999.0;
 float         cachedDistRear = 999.0;
-bool          frontEverEcho  = false;   // car won't drive until the front sensor has answered once
-bool          rearEverEcho   = false;
 unsigned long lastPingMs     = 0;
 bool          pingFrontNext  = true;
 #define PING_INTERVAL_MS 30            // each sensor refreshes every 60 ms
@@ -261,8 +264,8 @@ float pingCm(int trigPin, int echoPin) {
 void updateUltrasonics() {
   if (millis() - lastPingMs < PING_INTERVAL_MS) return;
   lastPingMs = millis();
-  if (pingFrontNext) { cachedDist     = pingCm(TRIG_PIN,      ECHO_PIN);      if (cachedDist     < 999.0f) frontEverEcho = true; }
-  else               { cachedDistRear = pingCm(TRIG_PIN_REAR, ECHO_PIN_REAR); if (cachedDistRear < 999.0f) rearEverEcho  = true; }
+  if (pingFrontNext) cachedDist     = pingCm(TRIG_PIN,      ECHO_PIN);
+  else               cachedDistRear = pingCm(TRIG_PIN_REAR, ECHO_PIN_REAR);
   pingFrontNext = !pingFrontNext;
 }
 
@@ -371,15 +374,10 @@ void applyCmd(MotorCmd cmd) {
 //    2. Front > 30 cm   → FORWARD
 //    3. Front 25–30 cm  → STOP (dead-band)
 //    4. Front < 25 cm   → BACKWARD, unless rear ≤ 25 cm → STOP
-//
-//  Safety: until the front ultrasonic has returned at least one echo the
-//  car stays stopped — a dead sensor reads "nothing ahead" forever.
-//  Wave a hand in front of it to start.
 // ═══════════════════════════════════════════════════════════════════════
 void navigate() {
   if (millis() - bootMs < STARTUP_DELAY_MS) { applyCmd(MC_STOP); return; }
   if (millis() < alertUntilMs)              { applyCmd(MC_STOP); return; }
-  if (!frontEverEcho)                       { applyCmd(MC_STOP); return; }
 
   float dist     = cachedDist;
   float distRear = cachedDistRear;
@@ -547,11 +545,6 @@ void printSensors() {
   Serial.printf("STATE : %s   (PWM R=%d L=%d)\n", motorState, pwmNowR, pwmNowL);
   Serial.printf("IR    : L=%s  R=%s\n", irLeftNow ? "OBS" : "CLR", irRightNow ? "OBS" : "CLR");
   Serial.printf("DIST  : Front=%.1f cm  Rear=%.1f cm\n", cachedDist, cachedDistRear);
-  if (!frontEverEcho)
-    Serial.println("[SENSOR] Front ultrasonic: no echo yet — car waits. Wave a hand in front; "
-                   "if nothing changes check its 5V, GND, TRIG=GPIO5, ECHO=GPIO18");
-  if (!rearEverEcho)
-    Serial.println("[SENSOR] Rear ultrasonic: no echo yet — check its 5V, GND, TRIG=GPIO2, ECHO=GPIO4");
   Serial.printf("ACCEL : X=%.2f Y=%.2f Z=%.2f g  [Amp=%d]%s\n", accelX, accelY, accelZ,
     (int)(sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ) * 10),
     mpuPresent ? "" : "  (MPU MISSING)");
@@ -597,6 +590,7 @@ void uplinkTask(void*) {
   http.setTimeout(UPLINK_TIMEOUT_MS);
 
   uint32_t      heartbeat = 0;
+  unsigned long wifiDownSince = millis();
   int           lastCode  = 0;
   unsigned long failures  = 0;
   bool          wifiWas   = false;
@@ -610,6 +604,16 @@ void uplinkTask(void*) {
       if (wifiNow) Serial.printf("[WIFI] connected, IP %s, RSSI %d dBm\n",
                                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
       else         Serial.println("[WIFI] disconnected — reconnecting in background");
+    }
+
+    // Auto-reconnect sometimes gives up after a failed first join; kick it
+    if (wifiNow) {
+      wifiDownSince = millis();
+    } else if (millis() - wifiDownSince > WIFI_RETRY_MS) {
+      wifiDownSince = millis();
+      Serial.printf("[WIFI] still not connected — retrying \"%s\"\n", WIFI_SSID);
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
 
     CarTelemetry t;
@@ -797,6 +801,22 @@ void scanI2C() {
   Serial.println("──────────────");
 }
 
+// Short Wi-Fi problem for the LCD, or nullptr when connected
+const char* wifiHint() {
+  if (WiFi.status() == WL_CONNECTED) return nullptr;
+  if (strcmp(WIFI_SSID, "your-wifi-ssid") == 0) return "WiFi: SET SSID";
+  switch (wifiReason) {
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_AUTH_EXPIRE:      return "WiFi: BAD PASS?";
+    case WIFI_REASON_NO_AP_FOUND:      return "WiFi: NOT FOUND";
+    default: break;
+  }
+  if (!wifiSeen) return "WiFi: NOT FOUND";
+  return "WiFi: JOINING..";
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 //  LCD UPDATE
 //    line 0:  I 810mA FWD  OK     (current estimate, motion, uplink OK/ERR/--)
@@ -826,8 +846,11 @@ void updateLCD() {
   char line0[17];
   char line1[17];
   snprintf(line0, sizeof(line0), "I%4dmA %-4s %3s", estimateCurrent_mA(), stShort, net);
-  if (!frontEverEcho) snprintf(line1, sizeof(line1), "NO FRONT ECHO   ");
-  else                snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
+  const char* hint = wifiHint();
+  if (hint && (millis() / 2000) % 2)
+    snprintf(line1, sizeof(line1), "%-16s", hint);
+  else
+    snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
 
   lcd.setCursor(0, 0); lcd.print(line0);
   lcd.setCursor(0, 1); lcd.print(line1);
@@ -854,6 +877,7 @@ void scanForNetwork() {
                     WiFi.RSSI(i), mine ? "   <- yours" : "");
   }
   WiFi.scanDelete();
+  wifiSeen = seen;
   if (!seen) {
     Serial.printf("[WIFI] \"%s\" NOT FOUND. Check: hotspot on, 2.4 GHz band (not 5 GHz), "
                   "name spelled exactly (case and spaces matter)\n", WIFI_SSID);
@@ -867,6 +891,7 @@ void onWifiDisconnected(WiFiEvent_t, WiFiEventInfo_t info) {
   static uint8_t lastReason = 0;
   static uint32_t count = 0;
   uint8_t r = info.wifi_sta_disconnected.reason;
+  wifiReason = r;
   count++;
   if (r == lastReason && count % 20 != 1) return;
   lastReason = r;
@@ -963,8 +988,11 @@ void setup() {
   bootStep("WiFi start...");
   WiFi.onEvent(onWifiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   WiFi.setAutoReconnect(true);
+  Serial.printf("[WIFI] joining \"%s\"\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASS);         // does NOT wait
-  WiFi.setTxPower(WIFI_TX_POWER);
+#if WIFI_LOW_TX_POWER
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+#endif
   delay(300);                               // let supply settle after radio on
   Serial.print("ESP32 MAC: "); Serial.println(WiFi.macAddress());
   Serial.printf("Portal  : %s%s\n", LIGHTSYNC_URL, TELEMETRY_PATH);
