@@ -39,7 +39,10 @@ cd lightsync
 ## Part 3 — Install the backend and frontend (once)
 
 ```powershell
-cd backend; python -m venv .venv; .venv\Scripts\python -m pip install -r requirements-dev.txt; cd ..
+cd backend
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+cd ..
 ```
 
 ```powershell
@@ -55,7 +58,7 @@ Copy-Item .env.example .env
 Generate two different keys. Run this twice and keep both outputs:
 
 ```powershell
-python -c "import secrets; print(secrets.token_urlsafe(32))"
+py -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
 Open `.env` in Notepad:
