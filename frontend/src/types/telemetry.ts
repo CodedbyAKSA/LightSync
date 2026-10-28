@@ -1,8 +1,9 @@
 // Mirrors backend/app/schemas.py. Keep the two in sync.
 
 export type Mode = 'demo' | 'live'
+export type LiveSource = 'blynk' | 'device'
 export type ConnectionStateName = 'connecting' | 'live' | 'stale' | 'offline' | 'demo'
-export type Source = 'blynk' | 'demo' | 'computed' | 'system'
+export type Source = 'blynk' | 'device' | 'demo' | 'computed' | 'system'
 export type Severity = 'info' | 'warning' | 'critical'
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
 export type ProximityLevel = 'clear' | 'warning' | 'critical' | 'unknown'
@@ -171,6 +172,7 @@ export interface Thresholds {
 
 export interface ConfigResponse {
   mode: Mode
+  live_source: LiveSource
   device_id: string
   poll_interval: number
   freshness_seconds: number
@@ -181,6 +183,7 @@ export interface ConfigResponse {
   commands_enabled: boolean
   blynk_configured: boolean
   blynk_server: string
+  device_key_configured: boolean
   operator_key_configured: boolean
   operator_auth_required: boolean
   config_errors: string[]

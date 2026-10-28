@@ -130,14 +130,15 @@ def readings_from_blynk(
 def readings_from_values(
     values: Mapping[str, Any], *, source: Source, observed_at: datetime,
     changed_at: Mapping[str, datetime] | None = None,
+    unavailable_reason: str = "not simulated",
 ) -> dict[str, Reading]:
-    """Build readings straight from logical field values (used by demo mode)."""
+    """Build readings straight from logical field values (demo mode and device posts)."""
     changed_at = changed_at or {}
     return {
         spec.key: build_reading(
             spec, present=spec.key in values, raw=values.get(spec.key), source=source, pin=None,
             observed_at=observed_at, changed_at=changed_at.get(spec.key, observed_at),
-            unavailable_reason="not simulated")
+            unavailable_reason=unavailable_reason)
         for spec in FIELDS
     }
 

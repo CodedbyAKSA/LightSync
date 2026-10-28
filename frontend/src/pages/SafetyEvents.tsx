@@ -9,7 +9,8 @@ import type { SafetyEvent, Severity, Source } from '../types/telemetry'
 const SEVERITIES: (Severity | 'all')[] = ['all', 'critical', 'warning', 'info']
 const SOURCES: { value: Source | 'all'; label: string }[] = [
   { value: 'all', label: 'All sources' },
-  { value: 'blynk', label: 'Hardware' },
+  { value: 'blynk', label: 'Hardware (Blynk)' },
+  { value: 'device', label: 'Hardware (car)' },
   { value: 'demo', label: 'Demo' },
   { value: 'system', label: 'System' },
 ]

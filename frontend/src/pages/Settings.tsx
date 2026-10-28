@@ -137,9 +137,19 @@ export default function Settings() {
 
         <Section title="Data source" right={config && <Pill tone={config.mode === 'demo' ? 'demo' : 'ok'} className="!text-xs uppercase">{config.mode}</Pill>}>
           <dl className="grid grid-cols-[190px_1fr] gap-y-2 text-sm">
-            <dt className="text-dim">Blynk token on server</dt><dd className="text-fg">{config?.blynk_configured ? 'Configured' : 'Not configured'}</dd>
-            <dt className="text-dim">Blynk server</dt><dd className="text-fg">{config?.blynk_server}</dd>
-            <dt className="text-dim">Poll interval</dt><dd className="text-fg">{config?.poll_interval} s</dd>
+            <dt className="text-dim">Live data source</dt><dd className="text-fg">{config?.live_source === 'device' ? 'Car posts over HTTP (LIGHTSYNC_LIVE_SOURCE=device)' : 'Blynk Cloud (LIGHTSYNC_LIVE_SOURCE=blynk)'}</dd>
+            {config?.live_source === 'device' ? (
+              <>
+                <dt className="text-dim">Device key on server</dt><dd className="text-fg">{config.device_key_configured ? 'Configured' : 'Not configured — set LIGHTSYNC_DEVICE_KEY'}</dd>
+                <dt className="text-dim">Car posts to</dt><dd className="font-mono text-xs text-fg">POST /api/device/telemetry</dd>
+              </>
+            ) : (
+              <>
+                <dt className="text-dim">Blynk token on server</dt><dd className="text-fg">{config?.blynk_configured ? 'Configured' : 'Not configured'}</dd>
+                <dt className="text-dim">Blynk server</dt><dd className="text-fg">{config?.blynk_server}</dd>
+                <dt className="text-dim">Poll interval</dt><dd className="text-fg">{config?.poll_interval} s</dd>
+              </>
+            )}
             <dt className="text-dim">Freshness threshold</dt><dd className="text-fg">{config?.freshness_seconds} s <span className="text-dim">(TELEMETRY_FRESHNESS_SECONDS)</span></dd>
             <dt className="text-dim">History buffer</dt><dd className="text-fg">{config?.history_max_samples} samples</dd>
             <dt className="text-dim">Remote commands</dt><dd className="text-fg">{config?.commands_enabled ? 'Enabled' : 'Disabled (COMMANDS_ENABLED=false)'}</dd>
@@ -211,8 +221,10 @@ export default function Settings() {
         onCancel={() => setPendingMode(null)}
       >
         {pendingMode === 'live'
-          ? 'The backend will poll Blynk for real hardware telemetry. If no token is configured the dashboard shows OFFLINE — it never falls back to demo data.'
-          : 'The backend will stop polling Blynk and serve simulated demo data, clearly labelled as such.'}
+          ? config?.live_source === 'device'
+            ? 'The backend will accept telemetry posted by the car. Until the car posts, the dashboard shows OFFLINE — it never falls back to demo data.'
+            : 'The backend will poll Blynk for real hardware telemetry. If no token is configured the dashboard shows OFFLINE — it never falls back to demo data.'
+          : 'The backend will stop using live hardware data and serve simulated demo data, clearly labelled as such.'}
       </ConfirmDialog>
     </div>
   )

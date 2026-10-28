@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILES, env_file_encoding="utf-8", extra="ignore")
 
     lightsync_mode: Literal["demo", "live"] = "demo"
+    # Where live data comes from: poll Blynk, or accept HTTP POSTs from the car itself.
+    lightsync_live_source: Literal["blynk", "device"] = "blynk"
+    # Shared secret the car sends in X-Device-Key when posting telemetry.
+    lightsync_device_key: SecretStr | None = None
     lightsync_device_id: str = "lightsync-gateway-01"
     lightsync_api_key: SecretStr | None = None
     lightsync_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -76,7 +80,7 @@ class Settings(BaseSettings):
             raise ValueError("BLYNK_SERVER must be a bare host name such as blynk.cloud or fra1.blynk.cloud")
         return v
 
-    @field_validator("lightsync_api_key", "blynk_token", mode="before")
+    @field_validator("lightsync_api_key", "lightsync_device_key", "blynk_token", mode="before")
     @classmethod
     def _empty_is_none(cls, v):  # noqa: ANN001
         if isinstance(v, str) and v.strip() == "":
@@ -90,6 +94,10 @@ class Settings(BaseSettings):
     @property
     def blynk_configured(self) -> bool:
         return self.blynk_token is not None
+
+    @property
+    def device_key_configured(self) -> bool:
+        return self.lightsync_device_key is not None
 
 
 def env_source() -> dict[str, str]:

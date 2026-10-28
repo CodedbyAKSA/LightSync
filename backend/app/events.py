@@ -2,8 +2,9 @@
 
 Events are derived from *transitions* between consecutive snapshots, so a
 condition that persists produces one event rather than one per poll. Every event
-carries the source of the snapshot that triggered it (``blynk`` for real
-hardware, ``demo`` for simulated data, ``system`` for connection changes).
+carries the source of the snapshot that triggered it (``blynk`` or ``device``
+for real hardware, ``demo`` for simulated data, ``system`` for connection
+changes).
 """
 
 from __future__ import annotations
@@ -41,7 +42,8 @@ class EventDetector:
     connection: str | None = None
     last_abnormal_at: float = field(default=-1e9)
 
-    def process(self, snap: TelemetrySnapshot, thresholds) -> list[SafetyEvent]:  # noqa: ANN001
+    def process(self, snap: TelemetrySnapshot, thresholds,  # noqa: ANN001
+                hardware_source: Source = "blynk") -> list[SafetyEvent]:
         events: list[SafetyEvent] = []
         now = snap.generated_at
         conn = snap.connection.state
@@ -61,7 +63,7 @@ class EventDetector:
         if conn not in {"live", "demo"}:
             return events
 
-        src: Source = "demo" if snap.mode == "demo" else "blynk"
+        src: Source = "demo" if snap.mode == "demo" else hardware_source
         r = snap.readings
 
         prox = snap.derived.proximity

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
@@ -16,6 +16,7 @@ from .schemas import (
     CommandResult,
     ConfigResponse,
     DatastreamInfo,
+    DeviceIngestResponse,
     DevicesResponse,
     EmergencyStopCommand,
     EventsResponse,
@@ -25,12 +26,13 @@ from .schemas import (
     TelemetrySnapshot,
     ThresholdsModel,
 )
-from .security import command_limiter, config_limiter, operator_guard
-from .telemetry import CommandRejected, TelemetryService
+from .security import command_limiter, config_limiter, device_guard, operator_guard
+from .telemetry import CommandRejected, DeviceRejected, TelemetryService
 
 router = APIRouter(prefix="/api")
 
 SSE_KEEPALIVE_S = 15.0
+MAX_DEVICE_FIELDS = 64
 
 
 def svc(request: Request) -> TelemetryService:
@@ -90,6 +92,24 @@ def _sse(kind: str, payload: dict) -> str:
     return f"event: {kind}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 
+@router.post("/device/telemetry", response_model=DeviceIngestResponse,
+             dependencies=[device_guard()])
+def device_telemetry(request: Request,
+                     body: dict[str, Any] = Body(..., examples=[{
+                         "obstacle_distance": 42.5, "ir_obstacle": 0, "accel_z": 9.79,
+                         "emergency_stop": 0, "heartbeat": 17}])) -> DeviceIngestResponse:
+    """Telemetry pushed by the car: a flat JSON object of LightSync field keys."""
+    if len(body) > MAX_DEVICE_FIELDS:
+        raise HTTPException(413, detail=f"At most {MAX_DEVICE_FIELDS} fields per post")
+    s = svc(request)
+    try:
+        accepted, ignored = s.ingest_device(body)
+    except DeviceRejected as exc:
+        raise HTTPException(exc.status_code, detail=str(exc)) from exc
+    return DeviceIngestResponse(status="accepted", accepted=accepted, ignored=ignored,
+                                received=s.device_posts)
+
+
 @router.get("/devices/status", response_model=DevicesResponse)
 def devices(request: Request) -> DevicesResponse:
     return svc(request).devices()
@@ -98,7 +118,7 @@ def devices(request: Request) -> DevicesResponse:
 @router.get("/events", response_model=EventsResponse)
 def events(request: Request,
            severity: Literal["info", "warning", "critical"] | None = None,
-           source: Literal["blynk", "demo", "system", "computed"] | None = None,
+           source: Literal["blynk", "device", "demo", "system", "computed"] | None = None,
            q: str | None = Query(None, max_length=100),
            limit: int = Query(200, ge=1, le=1000)) -> EventsResponse:
     s = svc(request)
@@ -116,8 +136,9 @@ def events(request: Request,
 def _config(s: TelemetryService) -> ConfigResponse:
     return ConfigResponse(
         mode=s.mode,
+        live_source=s.settings.lightsync_live_source,
         device_id=s.settings.lightsync_device_id,
-        poll_interval=s.settings.blynk_poll_interval if s.mode == "live" else 1.0,
+        poll_interval=s.settings.blynk_poll_interval if s.mode == "live" and not s.device_source else 1.0,
         freshness_seconds=s.settings.telemetry_freshness_seconds,
         history_max_samples=s.settings.history_max_samples,
         thresholds=ThresholdsModel(**s.thresholds.model_dump()),
@@ -137,6 +158,7 @@ def _config(s: TelemetryService) -> ConfigResponse:
         commands_enabled=s.settings.commands_enabled,
         blynk_configured=s.settings.blynk_configured,
         blynk_server=s.settings.blynk_server,
+        device_key_configured=s.settings.device_key_configured,
         operator_key_configured=s.settings.lightsync_api_key is not None,
         operator_auth_required=s.settings.lightsync_api_key is not None or s.mode == "live",
         config_errors=s.config_errors,

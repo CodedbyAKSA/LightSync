@@ -14,12 +14,20 @@ ESP8266 node ──ESP-NOW──▶ ESP32 gateway ──Wi-Fi/HTTPS──▶ Bly
 - Only the **ESP32 gateway** connects to Wi-Fi and Blynk. The ESP8266 never talks to Blynk directly.
 - The **backend** is the only component that knows the Blynk token. It polls Blynk, validates and normalizes the values, keeps a bounded history, detects events and streams snapshots to the browser over Server-Sent Events (SSE). If streaming is unavailable, the browser falls back to polling.
 
+A simpler setup is also supported: a **single ESP32 car** posts its readings straight to the backend over Wi-Fi, with no ESP-NOW and no Blynk. Set `LIGHTSYNC_LIVE_SOURCE=device` and see [docs/CAR_HTTP_SETUP.md](docs/CAR_HTTP_SETUP.md).
+
+```
+ESP32 car ──Wi-Fi / HTTP POST──▶ LightSync backend ──SSE──▶ Browser
+          X-Device-Key            /api/device/telemetry
+```
+
 ## Documentation
 
 | Guide | What it covers |
 |---|---|
 | [docs/RUNNING.md](docs/RUNNING.md) | Install, start, check, test and deploy the app, plus troubleshooting for every common error |
 | [docs/BLYNK_SETUP.md](docs/BLYNK_SETUP.md) | Step-by-step Blynk setup: template, datastreams, device token, `.env`, firmware, live mode and commands |
+| [docs/CAR_HTTP_SETUP.md](docs/CAR_HTTP_SETUP.md) | Single-ESP32 car that posts straight to the backend over Wi-Fi (no ESP-NOW, no Blynk) |
 
 ## Screenshots
 
@@ -54,6 +62,7 @@ All screenshots are from the built-in **demo mode**, except the last row, which 
 | `frontend/src/components/vehicle/VehicleScene.tsx` | React Three Fiber vehicle scene (procedural geometry) |
 | `firmware/esp32_gateway/` | Example gateway sketch (ESP-NOW receiver + Blynk publisher) |
 | `firmware/esp8266_node/` | Example node sketch (sensors → ESP-NOW) |
+| `firmware/lightsync_car/` | Single-ESP32 car sketch that POSTs telemetry to `/api/device/telemetry` |
 
 ## 1. Prerequisites
 
