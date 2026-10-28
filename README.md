@@ -36,8 +36,7 @@ All screenshots are from the built-in **demo mode**, except the last row, which 
 | ![Battery Health page](docs/screenshots/06-battery-health.png) | ![Automation page](docs/screenshots/07-automation.png) |
 | **Device Network** | **Settings** |
 | ![Device Network page](docs/screenshots/08-device-network.png) | ![Settings page](docs/screenshots/09-settings.png) |
-| **Live mode without a Blynk token** (honest OFFLINE state) | **Mobile** |
-| ![Offline without token](docs/screenshots/13-offline-no-token.png) | ![Mobile overview](docs/screenshots/11-mobile-overview.png) ![Mobile navigation](docs/screenshots/12-mobile-navigation.png) |
+
 
 ## Contents
 
@@ -266,7 +265,6 @@ Frontend tests cover:
 
 - **Accident risk** is a transparent rule-based estimate (`backend/app/risk.py`), not an AI model, unless the hardware publishes `risk_score`.
 - **Bluetooth:** the link card shows **ESP-NOW** because this hardware doesn't implement Bluetooth. It switches to Bluetooth only if `PIN_BLUETOOTH_LINK` is mapped.
-- **Drowsiness** shows *Sensor Unavailable* unless a detector publishes to its pin.
 - **Battery:** state of charge and state of health are never derived from voltage or from each other.
 - **Charts:** the overview plots vector magnitudes, |a| (m/s², including gravity) and |ω| (°/s), on separate labelled axes. **Live Sensors** shows each axis.
 - **3D vehicle:** procedural geometry (no external model). Drag to rotate; the reset button restores the view.
