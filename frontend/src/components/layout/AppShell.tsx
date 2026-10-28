@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useTelemetry } from '../../state/TelemetryProvider'
 import { StatusDot, type Tone } from '../ui/primitives'
@@ -32,7 +32,10 @@ export function AppShell() {
           <ConnectionBadge />
         </div>
         <main className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <Outlet />
+          {/* Lazy pages load here so the sidebar and header stay on screen. */}
+          <Suspense fallback={<div className="p-6 text-sm text-dim">Loading…</div>}>
+            <Outlet />
+          </Suspense>
         </main>
         <Footer />
       </div>

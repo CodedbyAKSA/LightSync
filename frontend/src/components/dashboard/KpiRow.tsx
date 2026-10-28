@@ -33,7 +33,7 @@ function KpiCard({ to, icon, label, note, value, tone, trailing, compact, title 
             <span
               className={cx(
                 'truncate font-bold leading-[1.1] tracking-[-0.02em]',
-                compact ? 'text-[clamp(20px,1.6vw,27px)]' : 'text-[clamp(26px,2.3vw,36px)]',
+                value.length > 14 ? 'text-[clamp(17px,1.3vw,22px)]' : compact ? 'text-[clamp(20px,1.6vw,27px)]' : 'text-[clamp(26px,2.3vw,36px)]',
                 tone === 'plain' ? 'text-fg' : toneText[tone],
               )}
             >

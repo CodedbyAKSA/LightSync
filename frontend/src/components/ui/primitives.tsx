@@ -49,10 +49,10 @@ export function Card({ className, children, ...rest }: HTMLAttributes<HTMLDivEle
 
 export function CardTitle({ icon, children, right, className }: { icon?: ReactNode; children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <div className={cx('flex items-center gap-3', className)}>
+    <div className={cx('flex flex-wrap items-center gap-x-3 gap-y-2', className)}>
       {icon && <span className="shrink-0 text-fg">{icon}</span>}
-      <h2 className="text-[19px] font-semibold leading-tight tracking-[-0.01em] text-fg">{children}</h2>
-      {right && <div className="ml-auto">{right}</div>}
+      <h2 className="min-w-0 text-[19px] font-semibold leading-tight tracking-[-0.01em] text-fg">{children}</h2>
+      {right && <div className="ml-auto shrink-0">{right}</div>}
     </div>
   )
 }
