@@ -11,13 +11,16 @@
  *
  *  Board: ESP32 Dev Module (Arduino core 3.x)
  *  Libraries: MPU6050 (Electronic Cats), LiquidCrystal I2C
- *  Put Wi-Fi + server settings in secrets.h — copy secrets.example.h.
+ *  Fill in YOUR SETTINGS below (Wi-Fi, server address, device key).
+ *  Optional: put them in a secrets.h next to this file instead (see
+ *  secrets.example.h); if secrets.h exists it is used automatically.
  *
  *  v26 changes vs v25:
  *    • ESP-NOW peers, SensorPacket and Blynk removed
  *    • Uplink task on core 0 posts telemetry every UPLINK_INTERVAL_MS;
  *        a slow or dead server can never freeze driving (core 1)
- *    • Optional battery-voltage sense on GPIO36 (USE_BATT_ADC)
+ *    • Battery voltage always sent: estimated from charge used and a
+ *        Li-ion discharge curve, or measured on GPIO36 (USE_BATT_ADC = 1)
  *    • Vibration sensor removed
  *    • LCD line 1 shows the uplink state: OK / ERR / -- (no Wi-Fi)
  *    • Navigation, motor soft-start, accident detection: same as v25
@@ -26,8 +29,8 @@
  *    obstacle_distance  front ultrasonic, cm (400 = nothing in range)
  *    ir_obstacle        1 if either IR edge sensor triggers
  *    accel_x/y/z        m/s²     gyro_x/y/z  °/s
- *    battery_voltage    V  (only when USE_BATT_ADC = 1)
- *    battery_soc        %  (from voltage if measured, else mAh estimate)
+ *    battery_voltage    V  (estimated, or measured when USE_BATT_ADC = 1)
+ *    battery_soc        %
  *    lcd_status, autonomous_mode, emergency_stop (= accident hold), heartbeat
  ***********************************************************************/
 
@@ -41,7 +44,7 @@ struct CarTelemetry {
   float    front, rear;
   bool     irAny;
   float    ax, ay, az, gx, gy, gz;
-  float    battV;           // NAN when not measured
+  float    battV;           // estimated or measured, volts
   int      soc;
   bool     lcdOk;
   bool     accident;
@@ -49,7 +52,19 @@ struct CarTelemetry {
 };
 
 /*************** INCLUDES ***************/
-#include "secrets.h"   // WIFI_SSID, WIFI_PASS, LIGHTSYNC_URL, LIGHTSYNC_DEVICE_KEY
+/***********************************************************************
+ *  YOUR SETTINGS — edit these four lines
+ *  LIGHTSYNC_URL: http://<your PC's IPv4 on the same Wi-Fi>:8000  (no trailing /)
+ *  LIGHTSYNC_DEVICE_KEY: exactly the same as LIGHTSYNC_DEVICE_KEY in .env
+ ***********************************************************************/
+#if __has_include("secrets.h")
+  #include "secrets.h"
+#else
+  #define WIFI_SSID            "your-wifi-ssid"
+  #define WIFI_PASS            "your-wifi-password"
+  #define LIGHTSYNC_URL        "http://192.168.1.50:8000"
+  #define LIGHTSYNC_DEVICE_KEY "paste-the-same-long-random-key-here"
+#endif
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include "esp_system.h"
@@ -66,8 +81,19 @@ struct CarTelemetry {
 #define WIFI_TX_POWER       WIFI_POWER_8_5dBm   // low = smaller current spikes
 const char* TELEMETRY_PATH = "/api/device/telemetry";
 
-/*************** BATTERY SENSE (optional) ***************/
-// Voltage divider from the pack you want to watch to GPIO36 (VP):
+/*************** BATTERY ***************/
+// Pack being watched (default: the 2-cell 2000 mAh pack that runs the ESP32)
+#define BATT_CELLS      2
+#define BATT_START_PCT  100     // charge when switched on (used while estimating)
+#define CELL_RINT_OHM   0.08f   // internal resistance per cell → voltage sag under load
+#define BATT_SMOOTH     0.15f   // smoothing per sensor update (~3 s settle, like a real pack)
+
+// Without a divider the voltage is ESTIMATED: open-circuit voltage from the
+// Li-ion curve at the estimated charge, minus I×R sag for the motor state.
+// It tracks the real pack only as well as BATT_START_PCT and the current
+// figures (CURRENT_*_MA) match reality — wire the divider for a true reading.
+//
+// Optional real measurement — voltage divider to GPIO36 (VP):
 //   pack + ── R1 ──┬── R2 ── GND        GPIO36 ── junction
 // 2-cell pack (8.4 V max): R1 = 100k, R2 = 47k  → 2.7 V at the pin
 // 3-cell pack (12.6 V max): R1 = 100k, R2 = 22k → 2.3 V at the pin
@@ -76,9 +102,10 @@ const char* TELEMETRY_PATH = "/api/device/telemetry";
 #define BATT_ADC_PIN    36
 #define BATT_R1_KOHM    100.0f
 #define BATT_R2_KOHM    47.0f
-#define BATT_CELLS      2
-#define CELL_EMPTY_V    3.2f
-#define CELL_FULL_V     4.2f
+
+// Li-ion open-circuit voltage per cell at 0, 10, 20 … 100 % charge
+const float OCV_TABLE[11] = { 3.20f, 3.55f, 3.68f, 3.74f, 3.77f, 3.80f,
+                              3.84f, 3.90f, 3.97f, 4.06f, 4.20f };
 
 /*************** MOTOR PINS ***************/
 #define EN_RIGHT   33
@@ -426,25 +453,51 @@ void updateBatteryTracking() {
   if (battMahUsed > BATTERY_MAH) battMahUsed = BATTERY_MAH;
 }
 
-float readBatteryVolts() {
+float ocvPerCell(float pct) {
+  pct = constrain(pct, 0.0f, 100.0f);
+  int i = min((int)(pct / 10.0f), 9);
+  float f = (pct - i * 10.0f) / 10.0f;
+  return OCV_TABLE[i] + f * (OCV_TABLE[i + 1] - OCV_TABLE[i]);
+}
+
+float percentFromOcv(float perCell) {
+  if (perCell <= OCV_TABLE[0])  return 0.0f;
+  if (perCell >= OCV_TABLE[10]) return 100.0f;
+  int i = 0;
+  while (perCell > OCV_TABLE[i + 1]) i++;
+  return (i + (perCell - OCV_TABLE[i]) / (OCV_TABLE[i + 1] - OCV_TABLE[i])) * 10.0f;
+}
+
+float sagVolts() {
+  return estimateCurrent_mA() / 1000.0f * CELL_RINT_OHM * BATT_CELLS;
+}
+
+float chargeUsedPercent() {
+  return constrain(BATT_START_PCT - battMahUsed / BATTERY_MAH * 100.0f, 0.0f, 100.0f);
+}
+
+float rawBatteryVolts() {
 #if USE_BATT_ADC
   uint32_t mv = 0;
   for (int i = 0; i < 16; i++) mv += analogReadMilliVolts(BATT_ADC_PIN);
   return (mv / 16.0f / 1000.0f) * (BATT_R1_KOHM + BATT_R2_KOHM) / BATT_R2_KOHM;
 #else
-  return NAN;
+  return ocvPerCell(chargeUsedPercent()) * BATT_CELLS - sagVolts();
 #endif
 }
 
-// Measured voltage if wired, otherwise the mAh estimate
+void updateBatteryVolts() {
+  float v = rawBatteryVolts();
+  battVolts = isnan(battVolts) ? v : battVolts + BATT_SMOOTH * (v - battVolts);
+}
+
 int batteryPercent() {
-  if (!isnan(battVolts)) {
-    float perCell = battVolts / BATT_CELLS;
-    float pct = (perCell - CELL_EMPTY_V) / (CELL_FULL_V - CELL_EMPTY_V) * 100.0f;
-    return (int)constrain(pct, 0.0f, 100.0f);
-  }
-  float pct = 100.0f - (battMahUsed / BATTERY_MAH * 100.0f);
-  return (int)constrain(pct, 0.0f, 100.0f);
+#if USE_BATT_ADC
+  // Add the load sag back so the percentage doesn't dip while the motors run
+  return (int)(percentFromOcv((battVolts + sagVolts()) / BATT_CELLS) + 0.5f);
+#else
+  return (int)(chargeUsedPercent() + 0.5f);
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -461,7 +514,8 @@ void readSensors() {
     gyroX  = gx /  131.0f;  gyroY  = gy /  131.0f;  gyroZ  = gz /  131.0f;
   }
 
-  battVolts = readBatteryVolts();
+  updateBatteryTracking();
+  updateBatteryVolts();
 
   const float G = 9.80665f;
   CarTelemetry t;
@@ -491,8 +545,8 @@ void printSensors() {
     mpuPresent ? "" : "  (MPU MISSING)");
   Serial.printf("GYRO  : X=%.1f Y=%.1f Z=%.1f  [Angle=%d]\n", gyroX, gyroY, gyroZ,
     (int)sqrt(gyroX*gyroX + gyroY*gyroY + gyroZ*gyroZ));
-  if (!isnan(battVolts)) Serial.printf("BATT  : %.2f V  (%d%%)\n", battVolts, batteryPercent());
-  else                   Serial.printf("BATT  : not measured  (estimate %d%%)\n", batteryPercent());
+  Serial.printf("BATT  : %.2f V  (%d%%, %s)\n", battVolts, batteryPercent(),
+    USE_BATT_ADC ? "measured" : "estimated");
   Serial.printf("NET   : WiFi=%s  RSSI=%d  uplink=%s (HTTP %d)\n",
     WiFi.status() == WL_CONNECTED ? "OK" : "--", WiFi.RSSI(), uplinkOk ? "OK" : "FAIL", uplinkHttpCode);
   Serial.println("─────────────────────────────");
@@ -509,12 +563,10 @@ int buildJson(char* out, size_t len, const CarTelemetry& t, uint32_t heartbeat) 
     "\"accel_x\":%.3f,\"accel_y\":%.3f,\"accel_z\":%.3f,"
     "\"gyro_x\":%.2f,\"gyro_y\":%.2f,\"gyro_z\":%.2f,"
     "\"battery_soc\":%d,\"lcd_status\":%d,\"autonomous_mode\":1,"
-    "\"emergency_stop\":%d,\"heartbeat\":%lu",
+    "\"emergency_stop\":%d,\"heartbeat\":%lu,\"battery_voltage\":%.2f}",
     t.front, t.irAny ? 1 : 0,
     t.ax, t.ay, t.az, t.gx, t.gy, t.gz,
-    t.soc, t.lcdOk ? 1 : 0, t.accident ? 1 : 0, (unsigned long)heartbeat);
-  if (!isnan(t.battV)) n += snprintf(out + n, len - n, ",\"battery_voltage\":%.2f", t.battV);
-  n += snprintf(out + n, len - n, "}");
+    t.soc, t.lcdOk ? 1 : 0, t.accident ? 1 : 0, (unsigned long)heartbeat, t.battV);
   return n;
 }
 
@@ -736,7 +788,7 @@ void scanI2C() {
 // ═══════════════════════════════════════════════════════════════════════
 //  LCD UPDATE
 //    line 0:  I 810mA FWD  OK     (current estimate, motion, uplink OK/ERR/--)
-//    line 1:  Batt: 87%  7.92V    (or mAh used when voltage isn't measured)
+//    line 1:  Batt: 87%  7.92V
 // ═══════════════════════════════════════════════════════════════════════
 void updateLCD() {
   if (lcdAlertActive) {
@@ -762,10 +814,7 @@ void updateLCD() {
   char line0[17];
   char line1[17];
   snprintf(line0, sizeof(line0), "I%4dmA %-4s %3s", estimateCurrent_mA(), stShort, net);
-  if (!isnan(battVolts))
-    snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
-  else
-    snprintf(line1, sizeof(line1), "Batt:%3d%% %4dmA", batteryPercent(), (int)battMahUsed);
+  snprintf(line1, sizeof(line1), "Batt:%3d%% %5.2fV", batteryPercent(), battVolts);
 
   lcd.setCursor(0, 0); lcd.print(line0);
   lcd.setCursor(0, 1); lcd.print(line1);
@@ -875,7 +924,8 @@ void setup() {
     T1_AMP_MAX, T2_AMP_MIN, T3_ANGLE_MIN, T3_ANGLE_MAX);
   Serial.printf("MOTOR  : MAX=%d  TURN=%d  soft-start %d/%dms\n",
     MAX_SPEED, TURN_SPEED, RAMP_STEP, RAMP_INTERVAL_MS);
-  Serial.printf("BATTERY: %s\n", USE_BATT_ADC ? "measured on GPIO36" : "estimated (USE_BATT_ADC=0)");
+  Serial.printf("BATTERY: %dS, %s\n", BATT_CELLS,
+    USE_BATT_ADC ? "measured on GPIO36" : "estimated from charge used (USE_BATT_ADC=0)");
   Serial.printf("LCD    : SDA=GPIO21 SCL=GPIO22 addr=0x%02X\n",     LCD_ADDR);
 }
 

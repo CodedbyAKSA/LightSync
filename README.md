@@ -25,6 +25,7 @@ ESP32 car ──Wi-Fi / HTTP POST──▶ LightSync backend ──SSE──▶ 
 
 | Guide | What it covers |
 |---|---|
+| [RUN.md](RUN.md) | Start to end on Windows: install, configure, start the dashboard, flash the car and see its live data |
 | [docs/RUNNING.md](docs/RUNNING.md) | Install, start, check, test and deploy the app, plus troubleshooting for every common error |
 | [docs/BLYNK_SETUP.md](docs/BLYNK_SETUP.md) | Step-by-step Blynk setup: template, datastreams, device token, `.env`, firmware, live mode and commands |
 | [docs/CAR_HTTP_SETUP.md](docs/CAR_HTTP_SETUP.md) | Single-ESP32 car that posts straight to the backend over Wi-Fi (no ESP-NOW, no Blynk) |

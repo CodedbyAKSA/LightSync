@@ -54,10 +54,12 @@ If the backend runs on a cloud server instead, put it behind HTTPS and use its `
 
 ## 3. Flash the car
 
-1. In `firmware/lightsync_car/`, copy `secrets.example.h` to `secrets.h` (git-ignored) and fill in:
+1. Open `firmware/lightsync_car/lightsync_car.ino` and edit the four lines under **YOUR SETTINGS**:
    - `WIFI_SSID`, `WIFI_PASS`. The ESP32 only supports 2.4 GHz Wi-Fi.
    - `LIGHTSYNC_URL`: `http://<PC IP>:8000`, with no trailing slash.
    - `LIGHTSYNC_DEVICE_KEY`: the same value as in `.env`.
+
+   The sketch compiles on its own. If you'd rather keep these out of the `.ino` (for example before committing), copy `secrets.example.h` to `secrets.h` in the same folder and fill it in. When `secrets.h` exists it's used automatically, and it's git-ignored.
 2. Board: **ESP32 Dev Module**, Arduino core 3.x. Libraries: **MPU6050** (Electronic Cats) and **LiquidCrystal I2C**.
 3. Upload, then open the Serial Monitor at 115200 baud.
 
@@ -80,12 +82,22 @@ The car posts one flat JSON object about once a second. Keys are LightSync field
 | `ir_obstacle` | `1` if either IR edge sensor triggers |
 | `accel_x`, `accel_y`, `accel_z` | m/s², Z includes gravity |
 | `gyro_x`, `gyro_y`, `gyro_z` | °/s |
-| `battery_voltage` | Volts. Only sent when `USE_BATT_ADC` is `1` and the divider is wired. |
-| `battery_soc` | %. From voltage when measured, otherwise the firmware's mAh estimate. |
+| `battery_voltage` | Volts. Estimated by default (see below); measured when `USE_BATT_ADC` is `1` and the divider is wired. |
+| `battery_soc` | %. From the measured voltage, or from the charge-used estimate. |
 | `lcd_status` | `1` when the LCD answered on I2C |
 | `autonomous_mode` | Always `1`; the car always drives itself |
 | `emergency_stop` | `1` while the car is stopped after detecting an accident |
 | `heartbeat` | Counter that goes up on every post |
+
+### How the battery voltage is estimated
+
+Without a voltage divider, the firmware estimates the pack voltage:
+
+1. It tracks charge used from the motor state (`CURRENT_*_MA`) and time, starting from `BATT_START_PCT`.
+2. It looks up the Li-ion open-circuit voltage for that charge in `OCV_TABLE` and multiplies by `BATT_CELLS`.
+3. It subtracts the voltage sag under load (current × `CELL_RINT_OHM` per cell) and smooths the result over a few seconds.
+
+A full 2-cell pack reads about 8.39 V at rest and 8.27 V while driving, and falls along the Li-ion curve as charge is used. The estimate is only as good as `BATT_START_PCT` and the current figures. Wire the divider and set `USE_BATT_ADC 1` for a true reading; nothing else changes.
 
 Fields the car doesn't send show as **Unavailable** on the dashboard, never as 0. Unknown keys are listed under `ignored` in the reply, which helps catch typos. Remote commands are turned off in this mode, because the car doesn't listen for them.
 
