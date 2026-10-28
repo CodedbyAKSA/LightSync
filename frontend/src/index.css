@@ -1,0 +1,123 @@
+@import '@fontsource-variable/inter';
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens. Dark values are sampled from the reference screenshot; light
+   mode keeps the same hierarchy with neutral surfaces. */
+:root,
+.light {
+  --bg: #eef2f7;
+  --surface-sidebar: #ffffff;
+  --surface-header: #ffffff;
+  --card: #ffffff;
+  --card-inset: #f4f7fb;
+  --line: #dde5ee;
+  --line-strong: #c9d5e2;
+  --fg: #0d1b2a;
+  --fg-muted: #4f6377;
+  --fg-dim: #7b8ca0;
+  --accent: #0891b2;
+  --accent-soft: rgba(8, 145, 178, 0.1);
+  --teal: #0d9488;
+  --green: #16a34a;
+  --green-soft: rgba(22, 163, 74, 0.12);
+  --blue: #2563eb;
+  --amber: #b45309;
+  --amber-soft: rgba(217, 119, 6, 0.14);
+  --red: #dc2626;
+  --red-soft: rgba(220, 38, 38, 0.12);
+  --violet: #7c3aed;
+  --violet-soft: rgba(124, 58, 237, 0.1);
+  --grid: #e2e8f0;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.dark {
+  --bg: #0a1621;
+  --surface-sidebar: #0b1825;
+  --surface-header: #0a1621;
+  --card: #111f2d;
+  --card-inset: #16263a;
+  --line: #1c2e40;
+  --line-strong: #253b52;
+  --fg: #f2f6fb;
+  --fg-muted: #a5b6c8;
+  --fg-dim: #6f8399;
+  --accent: #22d3ee;
+  --accent-soft: rgba(34, 211, 238, 0.12);
+  --teal: #2dd4bf;
+  --green: #3ddc6e;
+  --green-soft: rgba(61, 220, 110, 0.14);
+  --blue: #3b82f6;
+  --amber: #f5b731;
+  --amber-soft: rgba(245, 183, 49, 0.16);
+  --red: #f05252;
+  --red-soft: rgba(240, 82, 82, 0.15);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.14);
+  --grid: #1f3144;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-sidebar: var(--surface-sidebar);
+  --color-header: var(--surface-header);
+  --color-card: var(--card);
+  --color-inset: var(--card-inset);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--fg-muted);
+  --color-dim: var(--fg-dim);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-teal: var(--teal);
+  --color-ok: var(--green);
+  --color-ok-soft: var(--green-soft);
+  --color-info: var(--blue);
+  --color-warn: var(--amber);
+  --color-warn-soft: var(--amber-soft);
+  --color-bad: var(--red);
+  --color-bad-soft: var(--red-soft);
+  --color-demo: var(--violet);
+  --color-demo-soft: var(--violet-soft);
+  --color-grid: var(--grid);
+  --shadow-card: var(--shadow);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
