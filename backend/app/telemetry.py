@@ -1,8 +1,15 @@
-"""Telemetry service: the single place that talks to Blynk (or the simulator).
+"""Telemetry service: the single place that talks to Blynk, the car or the simulator.
 
 One background loop fetches data, normalizes it, keeps a bounded history,
 detects events and fans snapshots out to SSE subscribers. Dashboard
 components never call Blynk themselves.
+
+In live mode the data comes from one of two sources (``LIGHTSYNC_LIVE_SOURCE``):
+
+* ``blynk``  — the loop polls Blynk Cloud.
+* ``device`` — the car POSTs JSON to ``/api/device/telemetry`` and
+  :meth:`TelemetryService.ingest_device` publishes it. The loop then only
+  watches freshness so the dashboard turns STALE when the car goes quiet.
 """
 
 from __future__ import annotations
@@ -52,11 +59,18 @@ from .schemas import (
 log = logging.getLogger("lightsync.telemetry")
 
 DEMO_INTERVAL_S = 1.0
+DEVICE_CHECK_INTERVAL_S = 1.0
 _cmd_ids = itertools.count(1)
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class DeviceRejected(Exception):
+    def __init__(self, message: str, status_code: int = 409):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class CommandRejected(Exception):
@@ -99,6 +113,9 @@ class TelemetryService:
         self._hardware_connected: bool | None = None
         self._last_hw_check = -1e9
         self._espnow_last_seen: datetime | None = None
+        self._device_values: dict[str, Any] | None = None
+        self._device_received_at: datetime | None = None
+        self.device_posts = 0
         self._demo = DemoProvider()
         self._demo_started = time.monotonic()
         self.blynk_status = BlynkStatus(configured=self.settings.blynk_configured,
@@ -168,7 +185,17 @@ class TelemetryService:
                                                  reason="Simulated data — not from hardware"), now)
 
     # ------------------------------------------------------------------- live
+    @property
+    def device_source(self) -> bool:
+        return self.mode == "live" and self.settings.lightsync_live_source == "device"
+
+    @property
+    def hardware_source(self) -> Literal["blynk", "device"]:
+        return self.settings.lightsync_live_source
+
     async def _tick_live(self) -> float:
+        if self.device_source:
+            return self._tick_device()
         now = utcnow()
         client = self._ensure_blynk()
         interval = self.settings.blynk_poll_interval
@@ -213,6 +240,64 @@ class TelemetryService:
         self._last_fresh = self._freshness_marker()
         self._publish(readings, self._live_connection(now), now)
         return interval
+
+    # ----------------------------------------------------------------- device
+    def ingest_device(self, values: dict[str, Any]) -> tuple[list[str], list[str]]:
+        """Accept one telemetry post from the car. Returns (accepted, ignored) keys.
+
+        Only known field keys are kept; each post replaces the previous one, so a
+        field the car stops sending becomes unavailable instead of going stale
+        silently.
+        """
+        if self.mode != "live":
+            raise DeviceRejected("The server is in demo mode; set LIGHTSYNC_MODE=live to accept car data")
+        if not self.device_source:
+            raise DeviceRejected("LIGHTSYNC_LIVE_SOURCE is 'blynk'; set it to 'device' to accept car data")
+        now = utcnow()
+        accepted = {k: v for k, v in values.items() if k in FIELD_BY_KEY}
+        ignored = sorted(k for k in values if k not in FIELD_BY_KEY)
+        for key, value in accepted.items():
+            if key not in self._prev_raw or self._prev_raw[key] != value:
+                self._changed_at[key] = now
+                self._prev_raw[key] = value
+        self._device_values = accepted
+        self._device_received_at = now
+        self.device_posts += 1
+        self._last_fresh = now
+        self._hardware_connected = True
+        readings = self._device_readings()
+        self._last_readings = readings
+        self._publish(readings, self._device_connection(now), now)
+        return sorted(accepted), ignored
+
+    def _device_readings(self) -> dict[str, Reading]:
+        return readings_from_values(self._device_values or {}, source="device",
+                                    observed_at=self._device_received_at or utcnow(),
+                                    changed_at=self._changed_at,
+                                    unavailable_reason="not sent by the car firmware")
+
+    def _device_connection(self, now: datetime) -> ConnectionStatus:
+        if self._device_received_at is None:
+            return ConnectionStatus(state="offline", hardware_connected=None,
+                                    reason="Waiting for the car to POST to /api/device/telemetry")
+        age = self._age(now)
+        if age is not None and age > self.settings.telemetry_freshness_seconds:
+            return ConnectionStatus(state="stale", last_update=self._last_fresh, age_seconds=age,
+                                    hardware_connected=False,
+                                    reason=f"No data from the car for {age:.0f} s")
+        return ConnectionStatus(state="live", last_update=self._last_fresh, age_seconds=age,
+                                hardware_connected=True)
+
+    def _tick_device(self) -> float:
+        """Posts publish themselves; this only re-publishes when the car goes quiet."""
+        now = utcnow()
+        connection = self._device_connection(now)
+        self._hardware_connected = connection.hardware_connected
+        if connection.state != "live":
+            readings = self._last_readings or readings_from_values(
+                {}, source="device", observed_at=now, unavailable_reason="no data from the car yet")
+            self._publish(readings, connection, now)
+        return DEVICE_CHECK_INTERVAL_S
 
     def _track_changes(self, raw: dict[str, Any], now: datetime) -> None:
         lowered = {str(k).lower(): v for k, v in raw.items()}
@@ -283,7 +368,7 @@ class TelemetryService:
             self._broadcast("sample", sample.model_dump(mode="json"))
             if flag(readings, "espnow_link"):
                 self._espnow_last_seen = now
-        for event in self.detector.process(snap, self.thresholds):
+        for event in self.detector.process(snap, self.thresholds, self.hardware_source):
             self._add_event(event)
         self._broadcast("snapshot", snap.model_dump(mode="json"))
 
@@ -350,6 +435,21 @@ class TelemetryService:
         rssi = number(readings, "espnow_rssi")
         loss = number(readings, "espnow_packet_loss")
         conn = snap.connection.state if snap else "connecting"
+        if self.device_source:
+            return DevicesResponse(
+                mode=self.mode,
+                devices=[
+                    DeviceInfo(id=self.settings.lightsync_device_id, name="LightSync car",
+                               chip="ESP32", role="Sensors, motors and Wi-Fi uplink",
+                               state=gateway_state, last_seen=self._device_received_at,
+                               details={"uplink": "Wi-Fi → LightSync API (HTTP POST)",
+                                        "posts_received": self.device_posts, "telemetry": conn}),
+                ],
+                blynk=BlynkStatus(configured=self.settings.blynk_configured,
+                                  server=self.settings.blynk_server),
+                espnow={"state": "unknown", "available": False, "rssi_dbm": None,
+                        "packet_loss_pct": None, "metrics_available": False, "source": "device"},
+            )
         return DevicesResponse(
             mode=self.mode,
             devices=[
@@ -384,6 +484,9 @@ class TelemetryService:
             if self.mode == "demo":
                 available = True
                 reason = "Simulated in demo mode — no hardware is involved"
+            elif self.device_source:
+                available, reason = False, ("Commands are not supported while the car posts "
+                                            "directly over HTTP")
             elif not self.settings.commands_enabled:
                 available, reason = False, "COMMANDS_ENABLED is false on the server"
             elif not self.settings.blynk_configured:

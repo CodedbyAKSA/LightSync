@@ -38,7 +38,11 @@ def build_service(settings: Settings, **kwargs) -> TelemetryService:
     except PinConfigError as exc:
         errors.append(f"Pin mapping error: {exc}. Falling back to default pins.")
         pin_map = resolve_pin_map({})
-    if settings.lightsync_mode == "live" and not settings.blynk_configured:
+    if settings.lightsync_live_source == "device":
+        if not settings.device_key_configured:
+            errors.append("LIGHTSYNC_LIVE_SOURCE=device but LIGHTSYNC_DEVICE_KEY is empty; "
+                          "the car's posts will be rejected.")
+    elif settings.lightsync_mode == "live" and not settings.blynk_configured:
         errors.append("LIGHTSYNC_MODE=live but BLYNK_TOKEN is empty; telemetry will be offline.")
     unmapped = [k for k, p in pin_map.items() if p is None and k in FIELD_BY_KEY]
     logging.getLogger("lightsync").info("Unmapped telemetry fields: %s", ", ".join(unmapped) or "none")

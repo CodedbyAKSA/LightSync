@@ -77,6 +77,7 @@ export function Pill({ tone, children, className }: { tone: Tone; children: Reac
 export function SourceBadge({ source }: { source: string }) {
   const map: Record<string, { tone: Tone; label: string }> = {
     blynk: { tone: 'ok', label: 'Hardware' },
+    device: { tone: 'ok', label: 'Hardware' },
     demo: { tone: 'demo', label: 'Demo' },
     system: { tone: 'neutral', label: 'System' },
     computed: { tone: 'accent', label: 'Computed' },

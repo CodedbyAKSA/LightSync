@@ -15,7 +15,7 @@ function Footer() {
       <span className="hidden h-5 w-px bg-line-strong sm:block" />
       <span className="ml-auto flex shrink-0 items-center gap-2 whitespace-nowrap" title={connection.reason ?? undefined}>
         <StatusDot tone={tone} className="!size-2.5" />
-        {mode === 'demo' ? 'Demo data' : mode === 'live' ? `Live mode · Blynk ${config?.blynk_server ?? ''} · ${connection.state}` : 'Connecting'}
+        {mode === 'demo' ? 'Demo data' : mode === 'live' ? `Live mode · ${config?.live_source === 'device' ? 'Car via HTTP' : `Blynk ${config?.blynk_server ?? ''}`} · ${connection.state}` : 'Connecting'}
       </span>
     </footer>
   )

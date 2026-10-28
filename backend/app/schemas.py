@@ -8,8 +8,9 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 Mode = Literal["demo", "live"]
+LiveSource = Literal["blynk", "device"]
 ConnectionStateName = Literal["connecting", "live", "stale", "offline", "demo"]
-Source = Literal["blynk", "demo", "computed", "system"]
+Source = Literal["blynk", "device", "demo", "computed", "system"]
 Severity = Literal["info", "warning", "critical"]
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
 ProximityLevel = Literal["clear", "warning", "critical", "unknown"]
@@ -171,6 +172,7 @@ class ThresholdsModel(BaseModel):
 
 class ConfigResponse(BaseModel):
     mode: Mode
+    live_source: LiveSource
     device_id: str
     poll_interval: float
     freshness_seconds: float
@@ -181,6 +183,7 @@ class ConfigResponse(BaseModel):
     commands_enabled: bool
     blynk_configured: bool
     blynk_server: str
+    device_key_configured: bool
     operator_key_configured: bool
     operator_auth_required: bool
     config_errors: list[str] = []
@@ -207,6 +210,13 @@ class CommandResult(BaseModel):
     message: str
     requested_at: datetime
     completed_at: datetime | None = None
+
+
+class DeviceIngestResponse(BaseModel):
+    status: Literal["accepted"]
+    accepted: list[str] = Field(description="Fields stored from this post.")
+    ignored: list[str] = Field(description="Keys that are not LightSync fields; check the firmware spelling.")
+    received: int = Field(description="Posts accepted since the server started or the mode last changed.")
 
 
 class HealthResponse(BaseModel):

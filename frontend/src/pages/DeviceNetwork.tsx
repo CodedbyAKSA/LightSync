@@ -19,7 +19,7 @@ function Hop({ icon, label, sub }: { icon: React.ReactNode; label: string; sub: 
 }
 
 export default function DeviceNetwork() {
-  const { snapshot, transport } = useTelemetry()
+  const { snapshot, transport, config } = useTelemetry()
   const [data, setData] = useState<DevicesResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -33,12 +33,22 @@ export default function DeviceNetwork() {
 
   const b = data?.blynk
   const e = data?.espnow
+  const direct = config?.live_source === 'device' && data?.mode === 'live'
 
   return (
     <div className="flex flex-col gap-5 p-4 sm:p-6">
-      <PageHeader icon={<Network size={36} />} title="Device Network" subtitle="ESP32 gateway, ESP8266 node, ESP-NOW and Blynk connectivity" />
+      <PageHeader icon={<Network size={36} />} title="Device Network" subtitle={direct ? 'ESP32 car posting straight to the LightSync API' : 'ESP32 gateway, ESP8266 node, ESP-NOW and Blynk connectivity'} />
       {error && <div className="rounded-lg border border-bad/30 bg-bad-soft px-4 py-2.5 text-sm text-bad">{error}</div>}
       <Card className="overflow-x-auto p-5">
+        {direct ? (
+          <div className="flex min-w-[520px] items-start justify-between gap-2">
+            <Hop icon={<Cpu size={22} />} label="ESP32 car" sub="sensors / motors" />
+            <div className="mt-4 flex flex-col items-center text-[11px] text-dim"><ArrowRight size={18} />Wi-Fi / HTTP POST</div>
+            <Hop icon={<Server size={22} />} label="LightSync API" sub="device key checked here" />
+            <div className="mt-4 flex flex-col items-center text-[11px] text-dim"><ArrowRight size={18} />SSE</div>
+            <Hop icon={<Monitor size={22} />} label="Dashboard" sub={transport} />
+          </div>
+        ) : (
         <div className="flex min-w-[760px] items-start justify-between gap-2">
           <Hop icon={<Cpu size={22} />} label="ESP8266 node" sub="sensors / actuators" />
           <div className="mt-4 flex flex-col items-center text-[11px] text-dim"><ArrowRight size={18} />ESP-NOW</div>
@@ -50,6 +60,7 @@ export default function DeviceNetwork() {
           <div className="mt-4 flex flex-col items-center text-[11px] text-dim"><ArrowRight size={18} />SSE</div>
           <Hop icon={<Monitor size={22} />} label="Dashboard" sub={transport} />
         </div>
+        )}
       </Card>
       <div className="grid gap-5 lg:grid-cols-2">
         {(data?.devices ?? []).map((d) => (
@@ -70,6 +81,7 @@ export default function DeviceNetwork() {
             </dl>
           </Card>
         ))}
+        {!direct && (<>
         <Card className="p-5">
           <h2 className="text-lg font-semibold text-fg">ESP-NOW link</h2>
           <dl className="mt-4 grid grid-cols-[130px_1fr] gap-y-2 text-sm">
@@ -99,6 +111,13 @@ export default function DeviceNetwork() {
           )}
           {snapshot?.connection.reason && <p className="mt-3 text-xs text-dim">Telemetry: {snapshot.connection.reason}</p>}
         </Card>
+        </>)}
+        {direct && snapshot?.connection.reason && (
+          <Card className="p-5">
+            <h2 className="text-lg font-semibold text-fg">Telemetry</h2>
+            <p className="mt-3 text-sm text-muted">{snapshot.connection.reason}</p>
+          </Card>
+        )}
       </div>
     </div>
   )

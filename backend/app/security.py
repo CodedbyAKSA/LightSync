@@ -1,9 +1,12 @@
-"""Operator authentication and rate limiting for state-changing endpoints.
+"""Operator and device authentication, plus rate limiting.
 
 State-changing requests (commands, mode switches, threshold edits) must carry
 ``X-API-Key`` matching ``LIGHTSYNC_API_KEY``. If no key is configured, those
 requests are only allowed while the server is in demo mode, where they affect
 the simulator alone. In live mode a key is mandatory.
+
+The car authenticates its telemetry posts with ``X-Device-Key`` matching
+``LIGHTSYNC_DEVICE_KEY``, a separate secret from the operator key.
 """
 
 from __future__ import annotations
@@ -43,6 +46,8 @@ class RateLimiter:
 
 command_limiter = RateLimiter(limit=10, window_seconds=60)
 config_limiter = RateLimiter(limit=30, window_seconds=60)
+# The car posts about once a second; this leaves room for retries.
+device_limiter = RateLimiter(limit=300, window_seconds=60)
 
 
 def _client_key(request: Request) -> str:
@@ -61,6 +66,26 @@ def verify_operator(request: Request, settings: Settings, mode: str) -> None:
     if not provided or not hmac.compare_digest(provided.encode(), configured.get_secret_value().encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid operator key",
                             headers={"WWW-Authenticate": "ApiKey"})
+
+
+def verify_device(request: Request, settings: Settings) -> None:
+    configured = settings.lightsync_device_key
+    if configured is None:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            detail="LIGHTSYNC_DEVICE_KEY must be configured on the server before "
+                                   "the car can post telemetry")
+    provided = request.headers.get("x-device-key")
+    if not provided or not hmac.compare_digest(provided.encode(), configured.get_secret_value().encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Missing or invalid device key",
+                            headers={"WWW-Authenticate": "ApiKey"})
+
+
+def device_guard():
+    def dependency(request: Request) -> None:
+        device_limiter.check(f"device:{_client_key(request)}")
+        verify_device(request, request.app.state.telemetry.settings)
+
+    return Depends(dependency)
 
 
 def operator_guard(limiter: RateLimiter):
