@@ -48,6 +48,7 @@ struct CarTelemetry {
   float    front, rear, left, right;   // cm, 400 = nothing in range
   bool     irL, irR, irAny;
   float    ax, ay, az, gx, gy, gz;
+  bool     mpuOk;           // false = MPU not answering, accel/gyro not sent
   float    battV;           // estimated or measured, volts
   int      soc;
   bool     lcdOk;
@@ -149,7 +150,8 @@ MPU6050 mpu(0x68);
 
 /*************** HARDWARE STATUS (filled in setup) ***************/
 bool lcdPresent = false;
-bool mpuPresent = false;
+bool mpuPresent = false;   // MPU found and initialised
+bool mpuOk      = false;   // last reading was real (not zeros / frozen)
 
 /*************** BOOT DIAGNOSTICS ***************/
 RTC_DATA_ATTR int bootCount = 0;   // survives resets, cleared on power-off
@@ -531,18 +533,73 @@ int batteryPercent() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
+//  MPU6050 — self-healing
+//  A power or wire glitch resets the MPU into sleep (readings freeze) or
+//  drops it off the bus (readings are all zero). Both are detected here,
+//  the readings are marked invalid, and the MPU is re-initialised.
+// ═══════════════════════════════════════════════════════════════════════
+#define MPU_RETRY_MS     2000   // look for a missing MPU this often
+#define MPU_FROZEN_READS 5      // identical raw readings in a row = asleep
+#define MPU_ZERO_READS   3      // all-zero readings in a row = off the bus
+
+bool startMpu() {
+  if (!i2cPresent(0x68)) return false;
+  mpu.initialize();
+  mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
+  mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
+  mpu.setSleepEnabled(false);
+  return true;
+}
+
+void readMpu() {
+  static int16_t       last[6]    = {};
+  static uint8_t       frozen     = 0, zeros = 0;
+  static unsigned long lastRetry  = 0;
+
+  if (!mpuPresent) {
+    mpuOk = false;
+    if (millis() - lastRetry >= MPU_RETRY_MS) {
+      lastRetry = millis();
+      if (startMpu()) {
+        mpuPresent = true;
+        frozen = zeros = 0;
+        Serial.println("[MPU] found and started ✓");
+      }
+    }
+    return;
+  }
+
+  int16_t r[6];
+  mpu.getMotion6(&r[0], &r[1], &r[2], &r[3], &r[4], &r[5]);
+  bool allZero = !(r[0] | r[1] | r[2] | r[3] | r[4] | r[5]);
+  bool same    = memcmp(r, last, sizeof(r)) == 0;
+  memcpy(last, r, sizeof(r));
+  zeros  = allZero ? zeros + 1 : 0;
+  frozen = (same && !allZero) ? frozen + 1 : 0;
+
+  if (zeros >= MPU_ZERO_READS || frozen >= MPU_FROZEN_READS) {
+    Serial.printf("[MPU] %s — re-initialising (check its VCC/GND/SDA/SCL wires)\n",
+                  zeros ? "not answering (all zeros)" : "readings frozen (MPU reset into sleep)");
+    mpuPresent = false;              // readMpu() retries startMpu() from now on
+    mpuOk = false;
+    lastRetry = millis() - MPU_RETRY_MS;
+    return;
+  }
+  if (allZero || same) { mpuOk = false; return; }   // suspicious; keep last good values
+
+  mpuOk  = true;
+  accelX = r[0] / 16384.0f; accelY = r[1] / 16384.0f; accelZ = r[2] / 16384.0f;
+  gyroX  = r[3] /  131.0f;  gyroY  = r[4] /  131.0f;  gyroZ  = r[5] /  131.0f;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  READ SENSORS + hand a snapshot to the uplink task
 // ═══════════════════════════════════════════════════════════════════════
 void readSensors() {
   irLeftNow  = !digitalRead(IR_LEFT);
   irRightNow = !digitalRead(IR_RIGHT);
 
-  if (mpuPresent) {
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-    accelX = ax / 16384.0f; accelY = ay / 16384.0f; accelZ = az / 16384.0f;
-    gyroX  = gx /  131.0f;  gyroY  = gy /  131.0f;  gyroZ  = gz /  131.0f;
-  }
+  readMpu();
 
   updateBatteryTracking();
   updateBatteryVolts();
@@ -558,6 +615,7 @@ void readSensors() {
   t.irAny    = irLeftNow || irRightNow;
   t.ax = accelX * G; t.ay = accelY * G; t.az = accelZ * G;
   t.gx = gyroX;      t.gy = gyroY;      t.gz = gyroZ;
+  t.mpuOk    = mpuOk;
   t.battV    = battVolts;
   t.soc      = batteryPercent();
   t.lcdOk    = lcdPresent;
@@ -580,7 +638,7 @@ void printSensors() {
   Serial.println();
   Serial.printf("ACCEL : X=%.2f Y=%.2f Z=%.2f g  [Amp=%d]%s\n", accelX, accelY, accelZ,
     (int)(sqrt(accelX*accelX + accelY*accelY + accelZ*accelZ) * 10),
-    mpuPresent ? "" : "  (MPU MISSING)");
+    mpuOk ? "" : mpuPresent ? "  (MPU NOT ANSWERING)" : "  (MPU MISSING — retrying)");
   Serial.printf("GYRO  : X=%.1f Y=%.1f Z=%.1f  [Angle=%d]\n", gyroX, gyroY, gyroZ,
     (int)sqrt(gyroX*gyroX + gyroY*gyroY + gyroZ*gyroZ));
   Serial.printf("BATT  : %.2f V  (%d%%, %s)\n", battVolts, batteryPercent(),
@@ -599,18 +657,21 @@ int buildJson(char* out, size_t len, const CarTelemetry& t, uint32_t heartbeat) 
   int n = snprintf(out, len,
     "{\"obstacle_distance\":%.1f,\"obstacle_distance_rear\":%.1f,"
     "\"ir_obstacle\":%d,\"ir_left\":%d,\"ir_right\":%d,"
-    "\"accel_x\":%.3f,\"accel_y\":%.3f,\"accel_z\":%.3f,"
-    "\"gyro_x\":%.2f,\"gyro_y\":%.2f,\"gyro_z\":%.2f,"
     "\"battery_soc\":%d,\"lcd_status\":%d,\"autonomous_mode\":1,"
-    "\"emergency_stop\":%d,\"heartbeat\":%lu,\"battery_voltage\":%.2f}",
+    "\"emergency_stop\":%d,\"heartbeat\":%lu,\"battery_voltage\":%.2f",
     t.front, t.rear, t.irAny ? 1 : 0, t.irL ? 1 : 0, t.irR ? 1 : 0,
-    t.ax, t.ay, t.az, t.gx, t.gy, t.gz,
     t.soc, t.lcdOk ? 1 : 0, t.accident ? 1 : 0, (unsigned long)heartbeat, t.battV);
+  // A missing MPU is reported as missing (dashboard: Unavailable), never as zeros
+  if (t.mpuOk)
+    n += snprintf(out + n, len - n,
+      ",\"accel_x\":%.3f,\"accel_y\":%.3f,\"accel_z\":%.3f,"
+      "\"gyro_x\":%.2f,\"gyro_y\":%.2f,\"gyro_z\":%.2f",
+      t.ax, t.ay, t.az, t.gx, t.gy, t.gz);
 #if USE_SIDE_ULTRASONIC
-  // Replace the closing brace with the side distances
-  n += snprintf(out + n - 1, len - n + 1, ",\"obstacle_distance_left\":%.1f,"
-                "\"obstacle_distance_right\":%.1f}", t.left, t.right) - 1;
+  n += snprintf(out + n, len - n, ",\"obstacle_distance_left\":%.1f,"
+                "\"obstacle_distance_right\":%.1f", t.left, t.right);
 #endif
+  n += snprintf(out + n, len - n, "}");
   return n;
 }
 
@@ -717,7 +778,7 @@ void resetTriggers() {
 }
 
 void detectAccident() {
-  if (!mpuPresent) return;                   // no sensor = no fake alerts
+  if (!mpuOk) { resetTriggers(); return; }  // no real reading = no fake alerts
   if (millis() < alertUntilMs) return;       // already showing an alert
 
   float ax = accelX, ay = accelY, az = accelZ;
@@ -1009,16 +1070,13 @@ void setup() {
   scanI2C();
 
   // ── MPU6050 ───────────────────────────────────────────────────────
+  bootStep("MPU6050...");
+  mpuPresent = startMpu();
   if (mpuPresent) {
-    bootStep("MPU6050...");
-    mpu.initialize();
-    mpu.setFullScaleAccelRange(MPU6050_ACCEL_FS_2);
-    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_250);
-    mpu.setSleepEnabled(false);
     Serial.println(mpu.testConnection() ? "MPU6050 OK ✓" : "MPU6050 ID mismatch (clone — readings still work)");
   } else {
     bootStep("MPU MISSING!");
-    Serial.println("MPU6050 NOT FOUND at 0x68 — accident detection disabled");
+    Serial.println("MPU6050 NOT FOUND at 0x68 — will keep retrying every 2 s");
     delay(1000);
   }
 
