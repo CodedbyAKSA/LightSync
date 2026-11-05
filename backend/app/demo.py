@@ -28,6 +28,21 @@ def _noise(tick: int, channel: int, scale: float) -> float:
     return random.Random(tick * 131 + channel).uniform(-scale, scale)
 
 
+def simulated_motion(elapsed: float) -> dict[str, float]:
+    """Smooth, plausible accelerometer (m/s²) and gyro (°/s) values for a small
+    car driving on a floor: gravity on Z, gentle sway, light vibration."""
+    tick = int(elapsed * 2)
+    t = elapsed
+    return {
+        "accel_x": round(0.45 * math.sin(t / 2.7) + 0.15 * math.sin(t * 1.9) + _noise(tick, 21, 0.08), 3),
+        "accel_y": round(0.30 * math.cos(t / 3.4) + 0.10 * math.sin(t * 2.3) + _noise(tick, 22, 0.08), 3),
+        "accel_z": round(GRAVITY + 0.20 * math.sin(t / 1.8) + _noise(tick, 23, 0.06), 3),
+        "gyro_x": round(4.0 * math.sin(t / 3.1) + _noise(tick, 24, 0.8), 2),
+        "gyro_y": round(3.0 * math.cos(t / 2.6) + _noise(tick, 25, 0.8), 2),
+        "gyro_z": round(12.0 * math.sin(t / 5.3) + _noise(tick, 26, 1.2), 2),
+    }
+
+
 class DemoProvider:
     def __init__(self) -> None:
         self.autonomous_mode = True

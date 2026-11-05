@@ -28,7 +28,7 @@ import httpx
 from .blynk import BlynkClient, BlynkError
 from .config import Settings, Thresholds
 from .datastreams import COMMAND_BY_KEY, COMMANDS, FIELD_BY_KEY
-from .demo import DemoProvider
+from .demo import DemoProvider, simulated_motion
 from .events import EventDetector, make_event
 from .normalize import (
     derived_reading,
@@ -257,6 +257,8 @@ class TelemetryService:
         if not self.device_source:
             raise DeviceRejected("LIGHTSYNC_LIVE_SOURCE is 'blynk'; set it to 'device' to accept car data")
         now = utcnow()
+        if self.settings.lightsync_simulate_motion:
+            values = {**values, **simulated_motion(time.monotonic() - self._demo_started)}
         accepted = {k: v for k, v in values.items() if k in FIELD_BY_KEY}
         ignored = sorted(k for k in values if k not in FIELD_BY_KEY)
         for key, value in accepted.items():

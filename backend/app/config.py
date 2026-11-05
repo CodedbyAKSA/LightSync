@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     lightsync_live_source: Literal["blynk", "device"] = "blynk"
     # Shared secret the car sends in X-Device-Key when posting telemetry.
     lightsync_device_key: SecretStr | None = None
+    # Replace the car's accelerometer/gyro with simulated motion (device source only).
+    # For demos where the IMU isn't working; turn off once a working MPU is fitted.
+    lightsync_simulate_motion: bool = False
     lightsync_device_id: str = "lightsync-gateway-01"
     lightsync_api_key: SecretStr | None = None
     lightsync_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

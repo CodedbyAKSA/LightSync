@@ -143,3 +143,23 @@ def test_demo_simulates_every_side():
         assert r[key].valid, key
     assert r["ir_obstacle"].value == (r["ir_left"].value or r["ir_right"].value)
     assert set(s.latest.derived.proximity_sides) == {"front", "rear", "left", "right"}
+
+
+def test_simulated_motion_replaces_car_imu():
+    s = device_service(lightsync_simulate_motion=True)
+    with client_for(s) as c:
+        body = {k: v for k, v in CAR_POST.items() if not k.startswith(("accel", "gyro"))}
+        post(c, body)
+        snap = c.get("/api/telemetry/latest").json()
+    r = snap["readings"]
+    for key in ("accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"):
+        assert r[key]["valid"], key
+    assert 9 < r["accel_z"]["value"] < 10.6
+    assert snap["derived"]["accel_magnitude"]["valid"]
+
+
+def test_motion_not_simulated_by_default():
+    s = device_service()
+    with client_for(s) as c:
+        post(c, {"obstacle_distance": 50})
+    assert s.latest.readings["accel_x"].available is False
