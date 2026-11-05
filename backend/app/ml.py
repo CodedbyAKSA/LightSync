@@ -80,12 +80,14 @@ class RiskModel:
             return
         try:
             self.meta = json.loads(self.meta_path.read_text()) if self.meta_path.is_file() else None
-            model = xgb.XGBClassifier()
-            model.load_model(self.path)
-            self._model = model
+            # Core Booster, not XGBClassifier: the sklearn wrapper needs scikit-learn,
+            # which the backend doesn't install.
+            booster = xgb.Booster()
+            booster.load_model(str(self.path))
+            self._model = booster
             log.info("Loaded XGBoost risk model from %s", self.path)
         except Exception as exc:  # pragma: no cover - corrupt file
-            self.error = f"could not load model: {type(exc).__name__}"
+            self.error = f"could not load model: {type(exc).__name__}: {exc}"[:300]
             log.warning("Could not load ML model: %s", exc)
 
     @property
@@ -108,9 +110,10 @@ class RiskModel:
             return MlPrediction(available=False, features=features,
                                 reason="not enough sensor data for a prediction")
         import numpy as np
+        import xgboost as xgb
 
         row = np.array([[np.nan if features.get(f) is None else float(features[f]) for f in self.features]])
-        probs = self._model.predict_proba(row)[0]
+        probs = self._model.predict(xgb.DMatrix(row, feature_names=self.features, missing=np.nan))[0]
         best = int(probs.argmax())
         return MlPrediction(
             available=True,
