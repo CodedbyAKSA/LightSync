@@ -1,4 +1,4 @@
-import { Activity, BatteryMedium, Home, Network, Settings, ShieldCheck, X } from 'lucide-react'
+import { Activity, BatteryMedium, BrainCircuit, Home, Network, Settings, ShieldCheck, X } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { CircuitArt, LogoMark } from '../ui/Brand'
 import { RobotArmIcon } from '../ui/icons'
@@ -11,6 +11,7 @@ export const NAV_ITEMS = [
   { to: '/battery', label: 'Battery Health', icon: BatteryMedium },
   { to: '/automation', label: 'Automation', icon: RobotArmIcon },
   { to: '/network', label: 'Device Network', icon: Network },
+  { to: '/ml', label: 'ML Insights', icon: BrainCircuit },
 ] as const
 
 function NavItem({ to, label, Icon, onNavigate }: { to: string; label: string; Icon: (typeof NAV_ITEMS)[number]['icon'] | typeof Settings; onNavigate?: () => void }) {

@@ -51,6 +51,22 @@ class RiskAssessment(BaseModel):
     factors: list[str] = []
 
 
+class MlPrediction(BaseModel):
+    available: bool
+    label: str | None = None
+    confidence: float | None = None
+    probabilities: dict[str, float] = {}
+    features: dict[str, float | None] = {}
+    model: str | None = None
+    reason: str | None = None
+
+
+class MlModelInfo(BaseModel):
+    available: bool
+    reason: str | None = None
+    meta: dict[str, Any] | None = None
+
+
 class Derived(BaseModel):
     accel_magnitude: Reading
     gyro_magnitude: Reading
@@ -59,6 +75,7 @@ class Derived(BaseModel):
     proximity_sides: dict[Side, ProximityLevel] = Field(
         default_factory=dict, description="Proximity per ultrasonic; 'front' equals proximity.")
     risk: RiskAssessment
+    ml: MlPrediction = Field(default_factory=lambda: MlPrediction(available=False, reason="not computed"))
 
 
 class TelemetrySnapshot(BaseModel):

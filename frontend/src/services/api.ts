@@ -4,6 +4,7 @@ import type {
   DevicesResponse,
   EventsResponse,
   HistoryResponse,
+  MlModelInfo,
   Mode,
   TelemetrySnapshot,
   Thresholds,
@@ -73,6 +74,7 @@ export const api = {
     request<HistoryResponse>(`/api/telemetry/history?window_seconds=${windowSeconds}`),
   events: (limit = 500) => request<EventsResponse>(`/api/events?limit=${limit}`),
   devices: () => request<DevicesResponse>('/api/devices/status'),
+  mlModel: () => request<MlModelInfo>('/api/ml/model'),
   config: () => request<ConfigResponse>('/api/config'),
   commandHistory: () => request<CommandResult[]>('/api/commands/history'),
   setThresholds: (t: Thresholds) =>

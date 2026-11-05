@@ -11,6 +11,7 @@ const BatteryHealth = lazy(() => import('./pages/BatteryHealth'))
 const Automation = lazy(() => import('./pages/Automation'))
 const DeviceNetwork = lazy(() => import('./pages/DeviceNetwork'))
 const Settings = lazy(() => import('./pages/Settings'))
+const MlInsights = lazy(() => import('./pages/MlInsights'))
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="battery" element={<BatteryHealth />} />
               <Route path="automation" element={<Automation />} />
               <Route path="network" element={<DeviceNetwork />} />
+              <Route path="ml" element={<MlInsights />} />
               <Route path="settings" element={<Settings />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

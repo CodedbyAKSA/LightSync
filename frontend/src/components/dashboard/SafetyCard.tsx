@@ -1,6 +1,7 @@
 import { ShieldAlert, ShieldCheck, ShieldQuestion } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { formatClock } from '../../lib/format'
+import { ML_CLASS_LABEL, ML_CLASS_TONE } from '../../lib/ml'
 import { safetyState } from '../../lib/status'
 import { useTelemetry } from '../../state/TelemetryProvider'
 import type { Severity } from '../../types/telemetry'
@@ -13,6 +14,7 @@ export function SafetyCard() {
   const state = safetyState(snapshot, connection.state)
   const Icon = state.tone === 'ok' ? ShieldCheck : state.tone === 'bad' ? ShieldAlert : ShieldQuestion
   const recent = events.slice(0, 2)
+  const ml = snapshot?.derived.ml
 
   return (
     <Card className="flex h-full min-h-[280px] flex-col px-5 pb-4 pt-5 xl:min-h-0">
@@ -22,6 +24,13 @@ export function SafetyCard() {
         <div className="min-w-0">
           <div className={cx('text-[clamp(20px,1.65vw,26px)] font-bold leading-tight tracking-[-0.01em]', toneText[state.tone])}>{state.title}</div>
           <div className="mt-1.5 text-[16px] text-fg/85">{state.description}</div>
+          {ml?.available && ml.label && (
+            <Link to="/ml" className="mt-2 inline-flex items-center gap-2 text-[14px] text-muted hover:text-fg">
+              <StatusDot tone={ML_CLASS_TONE[ml.label]} className="!size-2.5" />
+              XGBoost prediction: <b className={toneText[ML_CLASS_TONE[ml.label]]}>{ML_CLASS_LABEL[ml.label]}</b>
+              <span className="tabular-nums">{Math.round((ml.confidence ?? 0) * 100)}%</span>
+            </Link>
+          )}
         </div>
       </div>
       <div className="mx-1 h-px bg-line" />

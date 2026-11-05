@@ -22,6 +22,7 @@ from .schemas import (
     EventsResponse,
     HealthResponse,
     HistoryResponse,
+    MlModelInfo,
     ModeUpdate,
     TelemetrySnapshot,
     ThresholdsModel,
@@ -108,6 +109,13 @@ def device_telemetry(request: Request,
         raise HTTPException(exc.status_code, detail=str(exc)) from exc
     return DeviceIngestResponse(status="accepted", accepted=accepted, ignored=ignored,
                                 received=s.device_posts)
+
+
+@router.get("/ml/model", response_model=MlModelInfo)
+def ml_model(request: Request) -> MlModelInfo:
+    """The XGBoost risk model: features, classes, test metrics and how its data was synthesized."""
+    model = svc(request).ml_model
+    return MlModelInfo(available=model.available, reason=model.error, meta=model.meta)
 
 
 @router.get("/devices/status", response_model=DevicesResponse)

@@ -163,6 +163,33 @@ Don't commit the `.ino` with your real Wi-Fi password and key. To keep them out 
    - **Device Network:** *LightSync car · online*, with a rising *posts received* count.
 5. **Switch the car off.** Within 15 seconds the header changes to **DATA STALE**. That's how you know the screen is showing real data.
 
+## Part 8b — ML Insights (XGBoost)
+
+After pulling this update, install the new backend packages (xgboost, numpy) once:
+
+```powershell
+cd backend; .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt; cd ..
+```
+
+The backend loads the trained model from `ml/models/risk_xgb.json` at startup. Open **ML Insights** in the sidebar to see:
+- the live prediction (safe / caution / danger / accident) and its probabilities,
+- test accuracy, the confusion matrix and feature importance,
+- how the training data is synthesized.
+
+The Overview safety card also shows a one-line "XGBoost prediction".
+
+To regenerate the data and retrain (optional; a trained model is already included):
+
+```powershell
+cd backend; .\.venv\Scripts\python.exe -m pip install -r ..\ml\requirements.txt
+```
+
+```powershell
+.\.venv\Scripts\python.exe ..\ml\synthesize.py; .\.venv\Scripts\python.exe ..\ml\train.py; cd ..
+```
+
+Restart the backend afterwards. Details: [ml/README.md](ml/README.md).
+
 ## Part 9 — Stop everything
 
 Press `Ctrl+C` in both PowerShell windows and switch off the car.

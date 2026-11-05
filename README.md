@@ -60,6 +60,8 @@ All screenshots are from the built-in **demo mode**, except the last row, which 
 | `backend/app/demo.py` | Deterministic demo simulator |
 | `backend/app/routes.py` | REST, SSE and command endpoints |
 | `frontend/src/` | React + TypeScript + Tailwind dashboard |
+| `ml/` | XGBoost accident-risk model: data synthesizer, trainer, dataset and trained model (see [ml/README.md](ml/README.md)) |
+| `backend/app/ml.py` | Runs the XGBoost model on every telemetry update |
 | `frontend/src/components/vehicle/VehicleScene.tsx` | React Three Fiber vehicle scene (procedural geometry) |
 | `firmware/esp32_gateway/` | Example gateway sketch (ESP-NOW receiver + Blynk publisher) |
 | `firmware/esp8266_node/` | Example node sketch (sensors → ESP-NOW) |

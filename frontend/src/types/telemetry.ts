@@ -48,6 +48,54 @@ export interface RiskAssessment {
   factors: string[]
 }
 
+export type MlClass = 'safe' | 'caution' | 'danger' | 'accident'
+
+export interface MlPrediction {
+  available: boolean
+  label: MlClass | null
+  confidence: number | null
+  probabilities: Partial<Record<MlClass, number>>
+  features: Record<string, number | null>
+  model: string | null
+  reason: string | null
+}
+
+export interface MlModelMeta {
+  name: string
+  algorithm: string
+  xgboost_version: string
+  trained_at: string
+  features: string[]
+  classes: MlClass[]
+  params: Record<string, string | number>
+  best_iteration: number
+  data: {
+    source: string
+    file: string
+    rows: number
+    train_rows: number
+    validation_rows: number
+    test_rows: number
+    label_noise: number
+    dropout: Record<string, number>
+    scenarios: { name: string; label: MlClass; share: number; description: string }[]
+  }
+  metrics: {
+    accuracy: number
+    macro_f1: number
+    per_class: Record<MlClass, { precision: number; recall: number; 'f1-score': number; support: number }>
+    confusion_matrix: number[][]
+    evaluated_on: string
+  }
+  feature_importance: Record<string, number>
+}
+
+export interface MlModelInfo {
+  available: boolean
+  reason: string | null
+  meta: MlModelMeta | null
+}
+
 export interface Derived {
   accel_magnitude: Reading
   gyro_magnitude: Reading
@@ -55,6 +103,7 @@ export interface Derived {
   proximity: ProximityLevel
   proximity_sides: Partial<Record<Side, ProximityLevel>>
   risk: RiskAssessment
+  ml?: MlPrediction
 }
 
 export interface TelemetrySnapshot {

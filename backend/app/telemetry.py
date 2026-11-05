@@ -29,6 +29,7 @@ from .blynk import BlynkClient, BlynkError
 from .config import Settings, Thresholds
 from .datastreams import COMMAND_BY_KEY, COMMANDS, FIELD_BY_KEY
 from .demo import DemoProvider, simulated_motion
+from .ml import extract_features, load_model
 from .events import EventDetector, make_event
 from .normalize import (
     derived_reading,
@@ -121,6 +122,7 @@ class TelemetryService:
         self.device_posts = 0
         self._demo = DemoProvider()
         self._demo_started = time.monotonic()
+        self._prev_front: tuple[float, float] | None = None
         self.blynk_status = BlynkStatus(configured=self.settings.blynk_configured,
                                         server=self.settings.blynk_server)
 
@@ -342,6 +344,19 @@ class TelemetryService:
         return readings_from_blynk({}, self.pin_map, observed_at=None, changed_at={})
 
     # ---------------------------------------------------------------- publish
+    @property
+    def ml_model(self):
+        return load_model(self.settings.lightsync_ml_model_path or None)
+
+    def _closing_speed(self, readings: dict[str, Reading]) -> float | None:
+        """How fast the front gap shrinks (cm/s, positive = approaching)."""
+        front = number(readings, "obstacle_distance")
+        mono = time.monotonic()
+        prev, self._prev_front = self._prev_front, (front, mono) if front is not None else None
+        if front is None or prev is None or mono - prev[1] < 0.2 or mono - prev[1] > 5:
+            return 0.0 if front is not None else None
+        return (prev[0] - front) / (mono - prev[1])
+
     def build_snapshot(self, readings: dict[str, Reading], connection: ConnectionStatus,
                        now: datetime) -> TelemetrySnapshot:
         observed = now if connection.state in {"live", "demo"} else None
@@ -362,6 +377,11 @@ class TelemetryService:
                              for side, key in SIDE_FIELDS.items()},
             risk=assess_risk(readings, th),
         )
+        if connection.state in {"live", "demo"}:
+            derived.ml = self.ml_model.predict(
+                extract_features(readings, self._closing_speed(readings)))
+        else:
+            derived.ml.reason = "telemetry is not live"
         return TelemetrySnapshot(device_id=self.settings.lightsync_device_id, mode=self.mode,
                                  generated_at=now, connection=connection, readings=readings,
                                  derived=derived)
